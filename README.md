@@ -25,8 +25,8 @@ A lightweight relational database management system implemented in TypeScript wi
 
 1. **Clone the repository:**
    ```bash
-   git clone <repository-url>
-   cd simple-rdbms
+   git clone https://github.com/vanda-mugo/RDBMS.git
+   cd RDBMS
    ```
 
 2. **Install dependencies:**
