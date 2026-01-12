@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple RDBMS - Web Interface</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Simple RDBMS</h1>
+            <p>Manage your in-memory database with persistence</p>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <div class="tabs">
+            <button class="tab-button active" onclick="showTab('records')">Records</button>
+            <button class="tab-button" onclick="showTab('tables')">Tables</button>
+            <button class="tab-button" onclick="showTab('stats')">Statistics</button>
+        </div>
+
+        <!-- Records Tab -->
+        <div id="records-tab" class="tab-content active">
+            <div class="controls">
+                <div class="control-group">
+                    <label for="table-select">Select Table:</label>
+                    <select id="table-select" onchange="loadRecords()">
+                        <option value="">Loading tables...</option>
+                    </select>
+                    <button onclick="refreshTables()" class="btn-secondary">Refresh</button>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Add New Record</h2>
+                <div id="add-record-form">
+                    <p>Select a table to see the form</p>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Existing Records</h2>
+                <div class="table-container">
+                    <table id="records-table">
+                        <thead id="records-thead">
+                            <tr><th>Select a table to view records</th></tr>
+                        </thead>
+                        <tbody id="records-tbody">
+                            <tr><td>No records to display</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tables Tab -->
+        <div id="tables-tab" class="tab-content">
+            <div class="section">
+                <h2>Create New Table</h2>
+                <form id="create-table-form" onsubmit="createTable(event)">
+                    <div class="form-group">
+                        <label for="new-table-name">Table Name:</label>
+                        <input type="text" id="new-table-name" required placeholder="e.g., products">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Columns:</label>
+                        <div id="columns-container">
+                            <div class="column-def">
+                                <input type="text" placeholder="Column name" class="col-name" required>
+                                <select class="col-type">
+                                    <option value="INT">INT</option>
+                                    <option value="VARCHAR">VARCHAR</option>
+                                    <option value="BOOLEAN">BOOLEAN</option>
+                                    <option value="DATE">DATE</option>
+                                </select>
+                                <label><input type="checkbox" class="col-primary"> Primary Key</label>
+                                <label><input type="checkbox" class="col-unique"> Unique</label>
+                            </div>
+                        </div>
+                        <button type="button" onclick="addColumnDef()" class="btn-secondary">+ Add Column</button>
+                    </div>
+                    
+                    <button type="submit" class="btn-primary">Create Table</button>
+                </form>
+            </div>
+
+            <div class="section">
+                <h2>Existing Tables</h2>
+                <div id="tables-list">
+                    <p>Loading tables...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Statistics Tab -->
+        <div id="stats-tab" class="tab-content">
+            <div class="section">
+                <h2>Database Statistics</h2>
+                <div id="stats-content">
+                    <p>Loading statistics...</p>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Backup & Restore</h2>
+                <button onclick="createBackup()" class="btn-primary">Create Backup</button>
+                <button onclick="loadBackups()" class="btn-secondary">View Backups</button>
+                <button onclick="refreshStats()" class="btn-secondary">Refresh Stats</button>
+            </div>
+
+            <div class="section" id="backups-section" style="display: none;">
+                <h2>Available Backups</h2>
+                <div id="backups-list"></div>
+            </div>
+        </div>
+
+        <div id="message" class="message"></div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

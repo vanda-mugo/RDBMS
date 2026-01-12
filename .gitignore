@@ -1,0 +1,21 @@
+node_modules/
+dist/
+*.log
+
+# Database files (shared data directory)
+data/
+database.json
+transaction.log
+
+# Legacy data directories (no longer used)
+repl-data/
+web-data/
+demo-data/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
