@@ -277,11 +277,11 @@ simple-rdbms-1/
 ## Summary
 
 This architecture provides:
-- ✅ **In-memory speed** for queries and updates
-- ✅ **Persistent storage** for data survival
-- ✅ **SQL interface** via Query Executor
-- ✅ **Indexing** for fast lookups
-- ✅ **ACID-like properties** (via backups)
-- ✅ **Clean separation of concerns**
+-  **In-memory speed** for queries and updates
+-  **Persistent storage** for data survival
+-  **SQL interface** via Query Executor
+-  **Indexing** for fast lookups
+-  **ACID-like properties** (via backups)
+-  **Clean separation of concerns**
 
-Each component has a single, well-defined responsibility! 🎯
+Each component has a single, well-defined responsibility! 
