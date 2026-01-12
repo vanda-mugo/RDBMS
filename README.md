@@ -308,6 +308,3 @@ Default settings:
 
 For detailed technical architecture and system design, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## License
-
-MIT License
