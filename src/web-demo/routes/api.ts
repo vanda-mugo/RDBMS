@@ -6,6 +6,9 @@ import { StorageEngine } from "../../core/storage-engine";
 const db = new Database();
 const storage = new StorageEngine("./data");
 
+// Concurrency flag for sync operations
+let isSyncing = false;
+
 // Load existing data from disk
 console.log(" Loading database from disk...");
 try {
@@ -407,6 +410,47 @@ export function setRoutes(app: Express) {
       });
     } catch (error) {
       res.status(500).json({ error: (error as Error).message });
+    }
+  });
+
+  // Sync database from disk
+  app.post("/api/sync", (req: Request, res: Response) => {
+    if (isSyncing) {
+      return res.status(409).json({ error: "Sync already in progress" });
+    }
+
+    isSyncing = true;
+
+    try {
+      console.log(" Syncing database from disk...");
+
+      // Drop all existing tables
+      const existingTables = db.listTables();
+      existingTables.forEach((tableName) => {
+        try {
+          db.dropTable(tableName);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.warn(`Could not drop table '${tableName}':`, message);
+        }
+      });
+
+      // Reload from disk
+      storage.loadDatabase(db);
+
+      const tables = db.listTables();
+      console.log(`✓ Database synced - loaded ${tables.length} table(s)`);
+
+      res.json({
+        message: "Database synced successfully",
+        tablesLoaded: tables.length,
+        tables: tables,
+      });
+    } catch (error) {
+      console.error("✗ Sync failed:", error);
+      res.status(500).json({ error: (error as Error).message });
+    } finally {
+      isSyncing = false;
     }
   });
 }

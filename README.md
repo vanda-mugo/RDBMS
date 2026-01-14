@@ -108,6 +108,7 @@ DROP TABLE orders
 **Utility Commands:**
 - `TABLES` - List all tables in the database with their schemas
 - `SAVE` - Manually save database to disk (auto-saves after each operation)
+- `SYNC` - Reload database from disk to synchronize with changes made in other interfaces
 - `BACKUP` - Create a timestamped backup file in `./data/`
 - `BACKUPS` - Display all available backup files with timestamps
 - `RESTORE <path>` - Restore database from a specific backup file
@@ -181,6 +182,11 @@ Database monitoring and backup management:
   - See backup file sizes and creation timestamps
   - Restore from any backup with confirmation dialog
   - Automatic success/failure notifications
+- **Database Synchronization**:
+  - Click "Sync Database" button to reload data from disk
+  - Synchronizes with changes made via REPL or external modifications
+  - Available in Records, Tables, and Statistics tabs
+  - Refreshes all views automatically after sync
 - **Storage Information**:
   - Current data directory location
   - Available disk space (if implemented)
@@ -240,6 +246,36 @@ Both REPL and Web Application share the same database stored in `./data/`:
 - `database-backup-*.json` - Timestamped backup files
 
 All modifications are automatically saved to disk. The database is loaded on startup and persisted after every write operation.
+
+## Database Synchronization
+
+The SYNC feature enables seamless coordination between REPL and Web interfaces:
+
+**Use Cases:**
+- **Multi-Interface Workflow**: Make changes in the web interface, sync in REPL to see updates
+- **External Modifications**: Manually edit `database.json`, sync to reload changes
+- **Concurrent Sessions**: Synchronize when running both REPL and web server simultaneously
+- **Fresh Start**: Reload database state after restore or backup operations
+
+**How to Sync:**
+
+**In REPL:**
+```bash
+RDBMS> SYNC
+ Syncing database from disk...
+ Database synced - loaded 6 table(s): users, products, orders, customers, inventory, logs
+```
+
+**In Web Interface:**
+- Click "Sync Database" button in Records, Tables, or Statistics tab
+- All views refresh automatically after successful sync
+- Status messages confirm sync completion
+
+**Technical Details:**
+- Clears in-memory database state
+- Reloads fresh data from `./data/database.json`
+- Maintains data consistency across interfaces
+- Safe concurrent operation with built-in locking
 
 ## Architecture
 

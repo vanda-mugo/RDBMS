@@ -29,6 +29,7 @@
                         <option value="">Loading tables...</option>
                     </select>
                     <button onclick="refreshTables()" class="btn-secondary">Refresh</button>
+                    <button onclick="syncDatabase()" class="btn-secondary" id="sync-btn-records">Sync Database</button>
                 </div>
             </div>
 
@@ -92,6 +93,10 @@
                     <p>Loading tables...</p>
                 </div>
             </div>
+
+            <div class="section">
+                <button onclick="syncDatabase()" class="btn-secondary" id="sync-btn-tables">Sync Database</button>
+            </div>
         </div>
 
         <!-- Statistics Tab -->
@@ -107,6 +112,7 @@
                 <h2>Backup & Restore</h2>
                 <button onclick="createBackup()" class="btn-primary">Create Backup</button>
                 <button onclick="loadBackups()" class="btn-secondary">View Backups</button>
+                <button onclick="syncDatabase()" class="btn-secondary" id="sync-btn">Sync Database</button>
                 <button onclick="refreshStats()" class="btn-secondary">Refresh Stats</button>
             </div>
 

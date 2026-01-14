@@ -47,6 +47,7 @@ export class REPL {
     console.log("\n⚡ Quick Commands:");
     console.log("  TABLES - List all tables");
     console.log("  SAVE - Save database to disk");
+    console.log("  SYNC - Reload database from disk");
     console.log("  BACKUP - Create backup");
     console.log("  BACKUPS - List available backups");
     console.log("  RESTORE <path> - Restore from backup");
@@ -95,6 +96,36 @@ export class REPL {
         console.log(
           `✓ Database saved (${this.storage.getDatabaseSize()} bytes)`
         );
+        this.prompt();
+        return;
+      }
+
+      if (command === "SYNC") {
+        console.log(" Syncing database from disk...");
+        try {
+          // Drop all existing tables
+          const existingTables = this.db.listTables();
+          existingTables.forEach((tableName) => {
+            try {
+              this.db.dropTable(tableName);
+            } catch (err) {
+              // Ignore drop errors
+            }
+          });
+
+          // Reload from disk
+          this.storage.loadDatabase(this.db);
+
+          // Show result
+          const tables = this.db.listTables();
+          console.log(
+            `✓ Database synced - loaded ${tables.length} table(s)${
+              tables.length > 0 ? ": " + tables.join(", ") : ""
+            }`
+          );
+        } catch (error: any) {
+          console.log(` Sync failed: ${error.message}`);
+        }
         this.prompt();
         return;
       }

@@ -486,6 +486,55 @@ function refreshStats() {
     showMessage('Statistics refreshed', 'success');
 }
 
+async function syncDatabase() {
+    const syncButtons = [
+        document.getElementById('sync-btn'),
+        document.getElementById('sync-btn-records'),
+        document.getElementById('sync-btn-tables')
+    ];
+
+    try {
+        // Disable all sync buttons
+        syncButtons.forEach(btn => {
+            if (btn) btn.disabled = true;
+        });
+
+        showMessage('Syncing database from disk...', 'info');
+
+        const response = await fetch('/api/sync', { method: 'POST' });
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.error);
+        }
+
+        showMessage(`Database synced! Loaded ${result.tablesLoaded} table(s)`, 'success');
+
+        // Refresh all data views
+        await refreshTables();
+        await loadStats();
+
+        // If on records tab and a table is selected, reload records
+        const recordsTab = document.getElementById('records-tab');
+        if (recordsTab.classList.contains('active') && currentTable) {
+            loadRecords();
+        }
+
+        // If on tables tab, reload table list
+        const tablesTab = document.getElementById('tables-tab');
+        if (tablesTab.classList.contains('active')) {
+            await loadTablesList();
+        }
+    } catch (error) {
+        showMessage('Error syncing database: ' + error.message, 'error');
+    } finally {
+        // Re-enable all sync buttons
+        syncButtons.forEach(btn => {
+            if (btn) btn.disabled = false;
+        });
+    }
+}
+
 async function createBackup() {
     try {
         const response = await fetch('/api/backup', { method: 'POST' });
