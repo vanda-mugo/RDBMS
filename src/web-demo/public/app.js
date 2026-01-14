@@ -375,7 +375,51 @@ async function editRecord(record) {
     fieldsContainer.innerHTML = currentTableSchema.map(col => {
         const isPK = col.isPrimaryKey;
         const isUnique = col.isUnique;
-        const currentValue = record[col.name] || '';
+        const currentValue = record[col.name];
+        
+        // Special handling for different data types
+        let inputHtml = '';
+        if (col.dataType === 'BOOLEAN') {
+            const isChecked = currentValue === true || currentValue === 1 || currentValue === 'true';
+            inputHtml = `
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <input 
+                        type="checkbox" 
+                        id="edit-${col.name}" 
+                        name="${col.name}"
+                        ${isChecked ? 'checked' : ''}
+                        ${isPK ? 'disabled' : ''}
+                        style="width: 20px; height: 20px; cursor: pointer;"
+                    >
+                    <label for="edit-${col.name}" style="margin: 0; cursor: pointer;">
+                        ${isChecked ? 'True' : 'False'} (Click to toggle)
+                    </label>
+                </div>
+            `;
+        } else {
+            // Format the display value based on data type
+            let displayValue = '';
+            if (currentValue !== null && currentValue !== undefined) {
+                if (col.dataType === 'DATE') {
+                    // Convert ISO date to YYYY-MM-DD format for date inputs
+                    const dateObj = currentValue instanceof Date ? currentValue : new Date(currentValue);
+                    displayValue = dateObj.toISOString().split('T')[0];
+                } else {
+                    displayValue = currentValue;
+                }
+            }
+            
+            inputHtml = `
+                <input 
+                    type="${getInputType(col.dataType)}" 
+                    id="edit-${col.name}" 
+                    name="${col.name}"
+                    value="${displayValue}"
+                    ${isPK ? 'disabled' : ''}
+                    placeholder="${isPK ? 'Cannot edit primary key' : 'Leave unchanged or enter new ' + col.name}"
+                >
+            `;
+        }
         
         return `
             <div class="form-group">
@@ -386,15 +430,7 @@ async function editRecord(record) {
                     ${isUnique && !isPK ? '<span class="field-badge badge-unique">UNIQUE</span>' : ''}
                     ${isPK ? '<span class="field-badge badge-readonly">READ-ONLY</span>' : ''}
                 </label>
-                <input 
-                    type="${getInputType(col.dataType)}" 
-                    id="edit-${col.name}" 
-                    name="${col.name}"
-                    value="${currentValue}"
-                    ${isPK ? 'disabled' : ''}
-                    ${!isPK ? 'required' : ''}
-                    placeholder="${isPK ? 'Cannot edit primary key' : 'Enter ' + col.name}"
-                >
+                ${inputHtml}
                 ${isPK ? '<small>Primary keys cannot be modified</small>' : ''}
             </div>
         `;
@@ -421,26 +457,43 @@ async function submitEditRecord(event) {
     const newValues = {};
     let hasChanges = false;
 
-    // Collect new values from form
+    // Collect new values from form - only include changed fields
     for (const col of currentTableSchema) {
         if (col.isPrimaryKey) continue;
 
         const input = document.getElementById(`edit-${col.name}`);
-        const newValue = input.value;
         const currentValue = editingRecord[col.name];
         
-        if (newValue !== currentValue) {
-            hasChanges = true;
-            if (col.dataType === 'INT') {
-                const num = parseInt(newValue, 10);
-                newValues[col.name] = isNaN(num) ? null : num;
-            } else if (col.dataType === 'BOOLEAN') {
-                newValues[col.name] = input.checked || newValue === 'true' || newValue === '1';
-            } else if (col.dataType === 'DATE') {
-                newValues[col.name] = newValue ? new Date(newValue).toISOString() : null;
+        let convertedValue, convertedCurrent;
+        
+        // Convert values based on data type for proper comparison
+        if (col.dataType === 'INT') {
+            convertedValue = input.value === '' ? null : parseInt(input.value, 10);
+            convertedCurrent = currentValue === null || currentValue === undefined ? null : parseInt(currentValue, 10);
+        } else if (col.dataType === 'BOOLEAN') {
+            // For checkboxes, use the checked property
+            convertedValue = input.checked;
+            convertedCurrent = currentValue === true || currentValue === 1 || currentValue === 'true';
+        } else if (col.dataType === 'DATE') {
+            // Normalize dates to comparable strings (YYYY-MM-DD format)
+            convertedValue = input.value || null;
+            if (currentValue) {
+                // Handle Date object or ISO string
+                const dateObj = currentValue instanceof Date ? currentValue : new Date(currentValue);
+                convertedCurrent = dateObj.toISOString().split('T')[0]; // Extract YYYY-MM-DD
             } else {
-                newValues[col.name] = newValue || null;
+                convertedCurrent = null;
             }
+        } else {
+            // VARCHAR and other string types
+            convertedValue = input.value || null;
+            convertedCurrent = currentValue || null;
+        }
+        
+        // Only include the field if it has actually changed
+        if (convertedValue !== convertedCurrent) {
+            hasChanges = true;
+            newValues[col.name] = convertedValue;
         }
     }
 
@@ -449,6 +502,12 @@ async function submitEditRecord(event) {
         closeEditRecordModal();
         return;
     }
+
+    // Debug: Log what we're sending
+    console.log('Updating record with values:', newValues);
+    console.log('Value types:', Object.entries(newValues).map(([key, val]) => 
+        `${key}: ${typeof val} ${val instanceof Date ? '(Date object!)' : ''}`
+    ));
 
     try {
         const response = await fetch(`/api/tables/${currentTable}/records`, {
