@@ -4,9 +4,9 @@ import { Column } from "../../core/column";
 import { StorageEngine } from "../../core/storage-engine";
 
 // Use default database for web interface
-const databaseName = "default";
-const db = new Database(databaseName);
-const storage = new StorageEngine("./data", databaseName);
+let currentDatabaseName = "default";
+let db = new Database(currentDatabaseName);
+let storage = new StorageEngine("./data", currentDatabaseName);
 
 // Concurrency flag for sync operations
 let isSyncing = false;
@@ -49,6 +49,196 @@ export function setRoutes(app: Express) {
   // Serve static files
   app.use(express.static("src/web-demo/public"));
 
+  // ==================== DATABASE MANAGEMENT ====================
+
+  // Get all databases
+  app.get("/api/databases", (req: Request, res: Response) => {
+    try {
+      const databases = StorageEngine.listDatabases();
+      const databaseList = databases.map((dbName) => ({
+        name: dbName,
+        current: dbName === currentDatabaseName,
+      }));
+
+      res.json({
+        databases: databaseList,
+        currentDatabase: currentDatabaseName,
+        count: databases.length,
+      });
+    } catch (error) {
+      console.error("Error listing databases:", error);
+      res.status(500).json({
+        error: "Failed to list databases",
+        message: (error as Error).message,
+      });
+    }
+  });
+
+  // Get current database info
+  app.get("/api/databases/current", (req: Request, res: Response) => {
+    try {
+      const tables = db.listTables();
+      const tableCount = tables.length;
+
+      let totalRecords = 0;
+      tables.forEach((tableName) => {
+        const table = db.getTable(tableName);
+        if (table) {
+          totalRecords += table.selectAll().length;
+        }
+      });
+
+      res.json({
+        name: currentDatabaseName,
+        tables: tables,
+        tableCount: tableCount,
+        totalRecords: totalRecords,
+      });
+    } catch (error) {
+      console.error("Error getting current database info:", error);
+      res.status(500).json({
+        error: "Failed to get database info",
+        message: (error as Error).message,
+      });
+    }
+  });
+
+  // Create a new database
+  app.post("/api/databases", (req: Request, res: Response) => {
+    try {
+      const { name } = req.body;
+
+      if (!name) {
+        return res.status(400).json({
+          error: "Database name is required",
+        });
+      }
+
+      // Validate database name
+      if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
+        return res.status(400).json({
+          error:
+            "Database name can only contain letters, numbers, underscores, and hyphens",
+        });
+      }
+
+      // Check if database already exists
+      const databases = StorageEngine.listDatabases();
+      if (databases.includes(name)) {
+        return res.status(409).json({
+          error: `Database '${name}' already exists`,
+        });
+      }
+
+      // Create new database
+      const newStorage = new StorageEngine("./data", name);
+      const newDb = new Database(name);
+      newDb.connect();
+      newStorage.saveDatabase(newDb);
+
+      res.status(201).json({
+        message: `Database '${name}' created successfully`,
+        name: name,
+      });
+    } catch (error) {
+      console.error("Error creating database:", error);
+      res.status(500).json({
+        error: "Failed to create database",
+        message: (error as Error).message,
+      });
+    }
+  });
+
+  // Switch to a different database
+  app.post("/api/databases/:name/use", (req: Request, res: Response) => {
+    try {
+      const { name } = req.params;
+
+      // Check if database exists
+      const databases = StorageEngine.listDatabases();
+      if (!databases.includes(name)) {
+        return res.status(404).json({
+          error: `Database '${name}' does not exist`,
+          availableDatabases: databases,
+        });
+      }
+
+      // Save current database before switching
+      console.log(` Saving current database '${currentDatabaseName}'...`);
+      storage.saveDatabase(db);
+
+      // Drop all current tables from memory
+      const currentTables = db.listTables();
+      currentTables.forEach((tableName) => {
+        try {
+          db.dropTable(tableName);
+        } catch (err) {
+          // Ignore drop errors
+        }
+      });
+
+      // Switch to new database
+      currentDatabaseName = name;
+      db.setDatabaseName(name);
+      storage = new StorageEngine("./data", name);
+
+      // Load the new database
+      console.log(` Loading database '${name}'...`);
+      storage.loadDatabase(db);
+
+      const tables = db.listTables();
+      res.json({
+        message: `Switched to database '${name}'`,
+        database: name,
+        tablesLoaded: tables.length,
+        tables: tables,
+      });
+    } catch (error) {
+      console.error("Error switching database:", error);
+      res.status(500).json({
+        error: "Failed to switch database",
+        message: (error as Error).message,
+      });
+    }
+  });
+
+  // Delete a database
+  app.delete("/api/databases/:name", (req: Request, res: Response) => {
+    try {
+      const { name } = req.params;
+
+      // Prevent deleting current database
+      if (name === currentDatabaseName) {
+        return res.status(400).json({
+          error: `Cannot drop current database '${name}'`,
+          message: "Switch to another database first",
+        });
+      }
+
+      // Check if database exists
+      const databases = StorageEngine.listDatabases();
+      if (!databases.includes(name)) {
+        return res.status(404).json({
+          error: `Database '${name}' does not exist`,
+        });
+      }
+
+      // Drop the database
+      StorageEngine.dropDatabase("./data", name);
+
+      res.json({
+        message: `Database '${name}' dropped successfully`,
+        name: name,
+      });
+    } catch (error) {
+      console.error("Error dropping database:", error);
+      res.status(500).json({
+        error: "Failed to drop database",
+        message: (error as Error).message,
+      });
+    }
+  });
+
   // ==================== TABLE MANAGEMENT ====================
 
   // Get all tables
@@ -70,7 +260,11 @@ export function setRoutes(app: Express) {
           recordCount,
         };
       });
-      res.json(tableDetails);
+      res.json({
+        currentDatabase: currentDatabaseName,
+        tables: tableDetails,
+        tableCount: tables.length,
+      });
     } catch (error) {
       res.status(500).json({ error: (error as Error).message });
     }
@@ -346,6 +540,7 @@ export function setRoutes(app: Express) {
     try {
       const tables = db.listTables();
       const stats = {
+        currentDatabase: currentDatabaseName,
         totalTables: tables.length,
         tables: tables.map((tableName) => {
           const table = db.getTable(tableName);

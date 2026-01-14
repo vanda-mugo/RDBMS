@@ -38,7 +38,8 @@ function showTab(tabName) {
 async function refreshTables() {
     try {
         const response = await fetch('/api/tables');
-        tables = await response.json();
+        const data = await response.json();
+        tables = data.tables || data; // Support both old and new format
 
         const select = document.getElementById('table-select');
         select.innerHTML = tables.length > 0
@@ -57,7 +58,8 @@ async function refreshTables() {
 async function loadTablesList() {
     try {
         const response = await fetch('/api/tables');
-        tables = await response.json();
+        const data = await response.json();
+        tables = data.tables || data; // Support both old and new format
 
         const container = document.getElementById('tables-list');
         
