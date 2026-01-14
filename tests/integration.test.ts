@@ -787,4 +787,242 @@ describe("Complete RDBMS Integration Tests", () => {
       expect(db2.query("products", () => true)).toHaveLength(1);
     });
   });
+
+  // ==================== SYNC FUNCTIONALITY TESTS ====================
+  describe("Database Synchronization (SYNC)", () => {
+    test("should sync database from disk after manual file changes", () => {
+      // Create and save initial data
+      db.createTable("users", [
+        new Column("id", "INT", true),
+        new Column("name", "VARCHAR"),
+      ]);
+      db.insert("users", { id: 1, name: "Alice" });
+      storage.saveDatabase(db);
+
+      // Simulate external file modification
+      db.insert("users", { id: 2, name: "Bob" });
+      expect(db.query("users", () => true)).toHaveLength(2);
+
+      // Drop all tables (SYNC step 1)
+      const tables = db.listTables();
+      tables.forEach((tableName) => db.dropTable(tableName));
+      expect(db.listTables()).toHaveLength(0);
+
+      // Reload from disk (SYNC step 2)
+      storage.loadDatabase(db);
+      expect(db.listTables()).toHaveLength(1);
+
+      // Should only have Alice (Bob was never saved)
+      const users = db.query("users", () => true);
+      expect(users).toHaveLength(1);
+      expect(users[0].name).toBe("Alice");
+    });
+
+    test("should handle SYNC with no tables", () => {
+      // Start with empty database
+      expect(db.listTables()).toHaveLength(0);
+
+      // SYNC on empty database should work
+      storage.loadDatabase(db);
+      expect(db.listTables()).toHaveLength(0);
+    });
+
+    test("should sync and preserve table structure", () => {
+      db.createTable("products", [
+        new Column("id", "INT", true),
+        new Column("name", "VARCHAR", false, true),
+        new Column("price", "INT"),
+      ]);
+      storage.saveDatabase(db);
+
+      // Drop and reload
+      db.dropTable("products");
+      storage.loadDatabase(db);
+
+      // Verify structure is preserved
+      const table = db.getTable("products");
+      expect(table).toBeDefined();
+      const columns = table!.getColumns();
+      expect(columns).toHaveLength(3);
+      expect(columns[0].isPrimaryKey).toBe(true);
+      expect(columns[1].isUnique).toBe(true);
+    });
+  });
+
+  // ==================== MULTI-DATABASE FUNCTIONALITY TESTS ====================
+  describe("Multi-Database Support", () => {
+    let analyticsStorage: StorageEngine;
+    let testStorage: StorageEngine;
+
+    beforeEach(() => {
+      analyticsStorage = new StorageEngine(testDataDir, "analytics");
+      testStorage = new StorageEngine(testDataDir, "test-db");
+    });
+
+    afterEach(() => {
+      // Clean up test databases
+      try {
+        StorageEngine.dropDatabase(testDataDir, "analytics");
+      } catch (e) {}
+      try {
+        StorageEngine.dropDatabase(testDataDir, "test-db");
+      } catch (e) {}
+    });
+
+    test("should create and manage multiple databases", () => {
+      const db1 = new Database("default");
+      const db2 = new Database("analytics");
+
+      db1.connect();
+      db2.connect();
+
+      db1.createTable("users", [
+        new Column("id", "INT", true),
+        new Column("name", "VARCHAR"),
+      ]);
+
+      db2.createTable("events", [
+        new Column("id", "INT", true),
+        new Column("event", "VARCHAR"),
+      ]);
+
+      storage.saveDatabase(db1);
+      analyticsStorage.saveDatabase(db2);
+
+      expect(db1.getDatabaseName()).toBe("default");
+      expect(db2.getDatabaseName()).toBe("analytics");
+      expect(db1.listTables()).toContain("users");
+      expect(db2.listTables()).toContain("events");
+    });
+
+    test("should list all available databases", () => {
+      const db1 = new Database("default");
+      const db2 = new Database("analytics");
+      const db3 = new Database("test-db");
+
+      storage.saveDatabase(db1);
+      analyticsStorage.saveDatabase(db2);
+      testStorage.saveDatabase(db3);
+
+      const databases = StorageEngine.listDatabases(testDataDir);
+
+      expect(databases).toContain("default");
+      expect(databases).toContain("analytics");
+      expect(databases).toContain("test-db");
+      expect(databases.length).toBeGreaterThanOrEqual(3);
+    });
+
+    test("should switch between databases", () => {
+      // Create data in default database
+      const defaultDb = new Database("default");
+      defaultDb.connect();
+      defaultDb.createTable("users", [
+        new Column("id", "INT", true),
+        new Column("name", "VARCHAR"),
+      ]);
+      defaultDb.insert("users", { id: 1, name: "Alice" });
+      storage.saveDatabase(defaultDb);
+
+      // Create data in analytics database
+      const analyticsDb = new Database("analytics");
+      analyticsDb.connect();
+      analyticsDb.createTable("events", [
+        new Column("id", "INT", true),
+        new Column("type", "VARCHAR"),
+      ]);
+      analyticsDb.insert("events", { id: 1, type: "login" });
+      analyticsStorage.saveDatabase(analyticsDb);
+
+      // Switch from default to analytics
+      expect(defaultDb.getDatabaseName()).toBe("default");
+      expect(defaultDb.listTables()).toContain("users");
+
+      // Simulate switching
+      defaultDb.listTables().forEach((t) => defaultDb.dropTable(t));
+      defaultDb.setDatabaseName("analytics");
+      analyticsStorage.loadDatabase(defaultDb);
+
+      expect(defaultDb.getDatabaseName()).toBe("analytics");
+      expect(defaultDb.listTables()).toContain("events");
+      expect(defaultDb.listTables()).not.toContain("users");
+    });
+
+    test("should isolate data between databases", () => {
+      const db1 = new Database("default");
+      const db2 = new Database("analytics");
+
+      db1.connect();
+      db2.connect();
+
+      // Create same table name in both databases
+      db1.createTable("logs", [
+        new Column("id", "INT", true),
+        new Column("message", "VARCHAR"),
+      ]);
+
+      db2.createTable("logs", [
+        new Column("id", "INT", true),
+        new Column("message", "VARCHAR"),
+      ]);
+
+      // Add different data
+      db1.insert("logs", { id: 1, message: "Default log" });
+      db2.insert("logs", { id: 1, message: "Analytics log" });
+
+      storage.saveDatabase(db1);
+      analyticsStorage.saveDatabase(db2);
+
+      // Verify isolation
+      const defaultLogs = db1.query("logs", () => true);
+      const analyticsLogs = db2.query("logs", () => true);
+
+      expect(defaultLogs[0].message).toBe("Default log");
+      expect(analyticsLogs[0].message).toBe("Analytics log");
+    });
+
+    test("should drop database and all its data", () => {
+      const testDb = new Database("test-db");
+      testDb.connect();
+      testDb.createTable("temp", [new Column("id", "INT", true)]);
+      testStorage.saveDatabase(testDb);
+
+      // Verify database exists
+      let databases = StorageEngine.listDatabases(testDataDir);
+      expect(databases).toContain("test-db");
+
+      // Drop database
+      StorageEngine.dropDatabase(testDataDir, "test-db");
+
+      // Verify database is gone
+      databases = StorageEngine.listDatabases(testDataDir);
+      expect(databases).not.toContain("test-db");
+    });
+
+    test("should handle database names with special characters", () => {
+      const db1 = new Database("test-db-123");
+      const db2 = new Database("my_database");
+
+      const storage1 = new StorageEngine(testDataDir, "test-db-123");
+      const storage2 = new StorageEngine(testDataDir, "my_database");
+
+      storage1.saveDatabase(db1);
+      storage2.saveDatabase(db2);
+
+      const databases = StorageEngine.listDatabases(testDataDir);
+      expect(databases).toContain("test-db-123");
+      expect(databases).toContain("my_database");
+
+      // Cleanup
+      StorageEngine.dropDatabase(testDataDir, "test-db-123");
+      StorageEngine.dropDatabase(testDataDir, "my_database");
+    });
+
+    test("should get current database name", () => {
+      const db1 = new Database("production");
+      expect(db1.getDatabaseName()).toBe("production");
+
+      db1.setDatabaseName("staging");
+      expect(db1.getDatabaseName()).toBe("staging");
+    });
+  });
 });
