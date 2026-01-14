@@ -3,8 +3,10 @@ import Database from "../../core/database";
 import { Column } from "../../core/column";
 import { StorageEngine } from "../../core/storage-engine";
 
-const db = new Database();
-const storage = new StorageEngine("./data");
+// Use default database for web interface
+const databaseName = "default";
+const db = new Database(databaseName);
+const storage = new StorageEngine("./data", databaseName);
 
 // Concurrency flag for sync operations
 let isSyncing = false;

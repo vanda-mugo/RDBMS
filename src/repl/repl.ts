@@ -12,7 +12,9 @@ export class REPL {
 
   constructor(database: Database) {
     this.db = database;
-    this.storage = new StorageEngine("./data");
+    // Use the database's name for storage
+    const databaseName = this.db.getDatabaseName();
+    this.storage = new StorageEngine("./data", databaseName);
     this.queryExecutor = new QueryExecutor(database);
 
     // Load existing data from disk
@@ -35,6 +37,7 @@ export class REPL {
     console.log("=====================================");
     console.log("Welcome to Simple RDBMS REPL");
     console.log("=====================================");
+    console.log(`Current Database: ${this.db.getDatabaseName()}`);
     console.log("Mode: SQL + Simple Commands");
     console.log("\n SQL Commands (full SQL syntax):");
     console.log("  SELECT * FROM users");
@@ -45,19 +48,25 @@ export class REPL {
     console.log("  CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR)");
     console.log("  DROP TABLE users");
     console.log("\n⚡ Quick Commands:");
-    console.log("  TABLES - List all tables");
+    console.log("  TABLES - List all tables in current database");
     console.log("  SAVE - Save database to disk");
     console.log("  SYNC - Reload database from disk");
     console.log("  BACKUP - Create backup");
     console.log("  BACKUPS - List available backups");
     console.log("  RESTORE <path> - Restore from backup");
-    console.log("  EXIT - Exit REPL (auto-saves)");
+    console.log("\n  Database Commands:");
+    console.log("  SHOW DATABASES - List all databases");
+    console.log("  CURRENT DATABASE - Show current database name");
+    console.log("  USE DATABASE <name> - Switch to another database");
+    console.log("  CREATE DATABASE <name> - Create new database");
+    console.log("  DROP DATABASE <name> - Delete a database");
+    console.log("\n  EXIT - Exit REPL (auto-saves)");
     console.log("=====================================\n");
     this.prompt();
   }
 
   private prompt() {
-    this.rl.question("RDBMS> ", (input) => {
+    this.rl.question(`RDBMS[${this.db.getDatabaseName()}]> `, (input) => {
       this.handleInput(input.trim());
     });
   }
@@ -87,6 +96,169 @@ export class REPL {
           "Tables:",
           tables.length === 0 ? "No tables found" : tables.join(", ")
         );
+        this.prompt();
+        return;
+      }
+
+      // Database management commands
+      if (command === "SHOW DATABASES") {
+        try {
+          const databases = StorageEngine.listDatabases();
+          if (databases.length === 0) {
+            console.log("No databases found");
+          } else {
+            console.log(`\nAvailable databases (${databases.length}):`);
+            databases.forEach((dbName) => {
+              const current =
+                dbName === this.db.getDatabaseName() ? " (current)" : "";
+              console.log(`  • ${dbName}${current}`);
+            });
+            console.log("\nTo switch: USE DATABASE <name>");
+          }
+        } catch (error: any) {
+          console.log(` Error listing databases: ${error.message}`);
+        }
+        this.prompt();
+        return;
+      }
+
+      if (command === "CURRENT DATABASE") {
+        console.log(`Current database: ${this.db.getDatabaseName()}`);
+        this.prompt();
+        return;
+      }
+
+      if (command.startsWith("USE DATABASE ")) {
+        const newDbName = input.substring(13).trim();
+        if (!newDbName) {
+          console.log(" Please specify a database name: USE DATABASE <name>");
+          this.prompt();
+          return;
+        }
+
+        try {
+          // Check if database exists
+          const databases = StorageEngine.listDatabases();
+          if (!databases.includes(newDbName)) {
+            console.log(` Database '${newDbName}' does not exist`);
+            console.log(`  Available databases: ${databases.join(", ")}`);
+            this.prompt();
+            return;
+          }
+
+          // Save current database before switching
+          console.log(
+            ` Saving current database '${this.db.getDatabaseName()}'...`
+          );
+          this.storage.saveDatabase(this.db);
+
+          // Drop all current tables from memory
+          const currentTables = this.db.listTables();
+          currentTables.forEach((tableName) => {
+            try {
+              this.db.dropTable(tableName);
+            } catch (err) {
+              // Ignore drop errors
+            }
+          });
+
+          // Switch to new database
+          this.db.setDatabaseName(newDbName);
+          this.storage = new StorageEngine("./data", newDbName);
+
+          // Load the new database
+          console.log(` Loading database '${newDbName}'...`);
+          this.storage.loadDatabase(this.db);
+
+          const tables = this.db.listTables();
+          console.log(
+            `✓ Switched to database '${newDbName}' (${tables.length} table(s))`
+          );
+        } catch (error: any) {
+          console.log(`✗ Error switching database: ${error.message}`);
+        }
+        this.prompt();
+        return;
+      }
+
+      if (command.startsWith("CREATE DATABASE ")) {
+        const newDbName = input.substring(16).trim();
+        if (!newDbName) {
+          console.log(
+            " Please specify a database name: CREATE DATABASE <name>"
+          );
+          this.prompt();
+          return;
+        }
+
+        // Validate database name (alphanumeric, underscores, hyphens)
+        if (!/^[a-zA-Z0-9_-]+$/.test(newDbName)) {
+          console.log(
+            " Database name can only contain letters, numbers, underscores, and hyphens"
+          );
+          this.prompt();
+          return;
+        }
+
+        try {
+          // Check if database already exists
+          const databases = StorageEngine.listDatabases();
+          if (databases.includes(newDbName)) {
+            console.log(` Database '${newDbName}' already exists`);
+            this.prompt();
+            return;
+          }
+
+          // Create new storage engine (this will create the directory)
+          const newStorage = new StorageEngine("./data", newDbName);
+
+          // Create an empty database and save it
+          const newDb = new Database(newDbName);
+          newDb.connect();
+          newStorage.saveDatabase(newDb);
+
+          console.log(`✓ Database '${newDbName}' created successfully`);
+          console.log(`  To switch: USE DATABASE ${newDbName}`);
+        } catch (error: any) {
+          console.log(` Error creating database: ${error.message}`);
+        }
+        this.prompt();
+        return;
+      }
+
+      if (command.startsWith("DROP DATABASE ")) {
+        const dbNameToDrop = input.substring(14).trim();
+        if (!dbNameToDrop) {
+          console.log(" Please specify a database name: DROP DATABASE <name>");
+          this.prompt();
+          return;
+        }
+
+        // Prevent dropping current database
+        if (dbNameToDrop === this.db.getDatabaseName()) {
+          console.log(` Cannot drop current database '${dbNameToDrop}'`);
+          console.log(
+            "  Switch to another database first with: USE DATABASE <name>"
+          );
+          this.prompt();
+          return;
+        }
+
+        try {
+          // Check if database exists
+          const databases = StorageEngine.listDatabases();
+          if (!databases.includes(dbNameToDrop)) {
+            console.log(` Database '${dbNameToDrop}' does not exist`);
+            this.prompt();
+            return;
+          }
+
+          // Drop the database using StorageEngine
+          StorageEngine.dropDatabase("./data", dbNameToDrop);
+          console.log(`✓ Database '${dbNameToDrop}' dropped successfully`);
+        } catch (error: any) {
+          console.log(` Error dropping database: ${error.message}`);
+        }
         this.prompt();
         return;
       }

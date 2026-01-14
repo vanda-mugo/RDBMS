@@ -9,8 +9,25 @@ import { Column } from "./column";
 class Database {
   private tables: { [key: string]: Table } = {};
   private connected: boolean = false;
+  private databaseName: string = "default";
 
-  constructor() {}
+  constructor(databaseName: string = "default") {
+    this.databaseName = databaseName;
+  }
+
+  /**
+   * Get the current database name
+   */
+  public getDatabaseName(): string {
+    return this.databaseName;
+  }
+
+  /**
+   * Set the database name (used when switching databases)
+   */
+  public setDatabaseName(name: string): void {
+    this.databaseName = name;
+  }
 
   connect() {
     this.connected = true;

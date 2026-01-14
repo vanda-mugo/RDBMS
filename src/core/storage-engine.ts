@@ -26,14 +26,41 @@ export class StorageEngine {
   private dataDir: string;
   private dbFilePath: string;
   private logFilePath: string;
+  private databaseName: string;
 
-  constructor(dataDir: string = "./data") {
-    this.dataDir = dataDir;
-    this.dbFilePath = path.join(dataDir, "database.json");
-    this.logFilePath = path.join(dataDir, "transaction.log");
+  constructor(dataDir: string = "./data", databaseName: string = "default") {
+    this.databaseName = databaseName;
+
+    // If databaseName is provided, use database-specific directory structure
+    if (databaseName !== "default" || this.isMultiDatabaseStructure(dataDir)) {
+      this.dataDir = path.join(dataDir, databaseName);
+    } else {
+      // Backward compatibility: use old structure for default database
+      this.dataDir = dataDir;
+    }
+
+    this.dbFilePath = path.join(this.dataDir, "database.json");
+    this.logFilePath = path.join(this.dataDir, "transaction.log");
 
     // Ensure data directory exists
     this.ensureDataDirectory();
+  }
+
+  /**
+   * Check if multi-database directory structure exists
+   */
+  private isMultiDatabaseStructure(baseDir: string): boolean {
+    const defaultDbDir = path.join(baseDir, "default");
+    return (
+      fs.existsSync(defaultDbDir) && fs.statSync(defaultDbDir).isDirectory()
+    );
+  }
+
+  /**
+   * Get current database name
+   */
+  public getDatabaseName(): string {
+    return this.databaseName;
   }
 
   /**
@@ -355,5 +382,155 @@ export class StorageEngine {
     } catch (error) {
       throw new Error(`Failed to delete database: ${error}`);
     }
+  }
+
+  /**
+   * List all available databases in the data directory
+   */
+  public static listDatabases(baseDataDir: string = "./data"): string[] {
+    try {
+      if (!fs.existsSync(baseDataDir)) {
+        return [];
+      }
+
+      const databases: string[] = [];
+
+      // Check for old single-database structure (backward compatibility)
+      const oldDbPath = path.join(baseDataDir, "database.json");
+      if (fs.existsSync(oldDbPath)) {
+        databases.push("default");
+      }
+
+      // Check for multi-database directory structure
+      const entries = fs.readdirSync(baseDataDir, { withFileTypes: true });
+
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          const dbFilePath = path.join(
+            baseDataDir,
+            entry.name,
+            "database.json"
+          );
+          if (fs.existsSync(dbFilePath)) {
+            // Avoid duplicates if "default" was already added
+            if (entry.name !== "default" || !databases.includes("default")) {
+              databases.push(entry.name);
+            }
+          }
+        }
+      }
+
+      return databases.sort();
+    } catch (error) {
+      return [];
+    }
+  }
+
+  /**
+   * Create a new database (creates directory structure)
+   */
+  public static createDatabase(
+    baseDataDir: string,
+    databaseName: string
+  ): void {
+    const dbDir = path.join(baseDataDir, databaseName);
+
+    if (fs.existsSync(dbDir)) {
+      throw new Error(`Database '${databaseName}' already exists`);
+    }
+
+    // Create database directory
+    fs.mkdirSync(dbDir, { recursive: true });
+
+    // Create empty database file
+    const emptyDb: SerializedDatabase = {
+      tables: {},
+      metadata: {
+        version: "1.0",
+        lastSaved: new Date().toISOString(),
+      },
+    };
+
+    const dbFilePath = path.join(dbDir, "database.json");
+    fs.writeFileSync(dbFilePath, JSON.stringify(emptyDb, null, 2));
+
+    console.log(`✓ Database '${databaseName}' created at ${dbDir}`);
+  }
+
+  /**
+   * Drop (delete) a database and all its files
+   */
+  public static dropDatabase(baseDataDir: string, databaseName: string): void {
+    if (databaseName === "default") {
+      throw new Error("Cannot drop the default database");
+    }
+
+    const dbDir = path.join(baseDataDir, databaseName);
+
+    if (!fs.existsSync(dbDir)) {
+      throw new Error(`Database '${databaseName}' does not exist`);
+    }
+
+    // Remove entire database directory
+    fs.rmSync(dbDir, { recursive: true, force: true });
+    console.log(`✓ Database '${databaseName}' dropped`);
+  }
+
+  /**
+   * Check if a database exists
+   */
+  public static databaseExistsStatic(
+    baseDataDir: string,
+    databaseName: string
+  ): boolean {
+    const dbDir = path.join(baseDataDir, databaseName);
+    const dbFilePath = path.join(dbDir, "database.json");
+    return fs.existsSync(dbFilePath);
+  }
+
+  /**
+   * Get database information (size, table count, etc.)
+   */
+  public static getDatabaseInfo(
+    baseDataDir: string,
+    databaseName: string
+  ): {
+    name: string;
+    size: number;
+    tableCount: number;
+    exists: boolean;
+    path: string;
+  } {
+    const dbDir = path.join(baseDataDir, databaseName);
+    const dbFilePath = path.join(dbDir, "database.json");
+
+    if (!fs.existsSync(dbFilePath)) {
+      return {
+        name: databaseName,
+        size: 0,
+        tableCount: 0,
+        exists: false,
+        path: dbDir,
+      };
+    }
+
+    const stats = fs.statSync(dbFilePath);
+    let tableCount = 0;
+
+    try {
+      const data = fs.readFileSync(dbFilePath, "utf-8");
+      const parsed = JSON.parse(data);
+      tableCount = Object.keys(parsed.tables || {}).length;
+    } catch (error) {
+      // If file is corrupted, tableCount stays 0
+    }
+
+    return {
+      name: databaseName,
+      size: stats.size,
+      tableCount,
+      exists: true,
+      path: dbDir,
+    };
   }
 }

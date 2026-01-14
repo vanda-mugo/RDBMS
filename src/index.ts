@@ -6,7 +6,8 @@ import { setRoutes } from "./web-demo/routes/api";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const db = new Database();
+// Use default database for REPL
+const db = new Database("default");
 
 const startREPL = () => {
   const repl = new REPL(db);
