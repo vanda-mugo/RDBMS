@@ -277,6 +277,340 @@ RDBMS> SYNC
 - Maintains data consistency across interfaces
 - Safe concurrent operation with built-in locking
 
+## Multi-Database Management
+
+The system supports managing multiple independent databases, each with its own isolated tables, records, and storage. This feature enables organizing data into logical units (e.g., separate databases for production, development, testing, or different projects).
+
+### Database Storage Structure
+
+Each database is stored in its own subdirectory under `./data/`:
+
+```
+data/
+├── default/                    # Default database (created automatically)
+│   ├── database.json          # Main database file
+│   └── transaction.log        # Operation history
+├── production/                 # Custom database: production
+│   ├── database.json
+│   └── transaction.log
+├── development/                # Custom database: development
+│   ├── database.json
+│   └── transaction.log
+└── analytics/                  # Custom database: analytics
+    ├── database.json
+    └── transaction.log
+```
+
+**Note:** For backward compatibility, if `./data/database.json` exists (old format), it will be automatically migrated to `./data/default/database.json` on first run.
+
+### Managing Databases via REPL
+
+The REPL provides four commands for database management:
+
+#### 1. **SHOW DATABASES** - List All Databases
+
+View all available databases with their storage locations:
+
+```bash
+RDBMS> SHOW DATABASES
+Available databases:
+  • default (./data/default) [CURRENT]
+  • production (./data/production)
+  • development (./data/development)
+  • analytics (./data/analytics)
+```
+
+The `[CURRENT]` indicator shows which database you're currently using.
+
+#### 2. **CREATE DATABASE** - Create New Database
+
+Create a new isolated database:
+
+```bash
+RDBMS> CREATE DATABASE testing
+✓ Database 'testing' created at ./data/testing
+```
+
+**Features:**
+- Automatically creates directory structure
+- Initializes empty database with transaction log
+- Database name must be valid (alphanumeric, hyphens, underscores)
+- Cannot create duplicate databases
+
+#### 3. **USE DATABASE** - Switch Active Database
+
+Switch to a different database context:
+
+```bash
+RDBMS> USE DATABASE production
+Saving current database 'default'...
+✓ Database saved to ./data/default/database.json
+Loading database 'production'...
+✓ Database loaded from ./data/production/database.json
+✓ Switched to database 'production'
+Loaded 3 table(s): users, orders, products
+```
+
+**Behavior:**
+- Automatically saves current database before switching
+- Loads target database from disk
+- All subsequent commands operate on the new database
+- Table lists and operations are completely isolated
+
+#### 4. **DROP DATABASE** - Delete Database
+
+Remove a database and all its data:
+
+```bash
+RDBMS> DROP DATABASE testing
+  Are you sure you want to delete database 'testing' and all its data? (yes/no): yes
+✓ Database 'testing' deleted
+```
+
+**Safety Features:**
+- Requires explicit confirmation (type "yes")
+- Cannot drop the currently active database (switch first)
+- Cannot drop the 'default' database (system protection)
+- Permanently deletes all tables and records
+
+### Managing Databases via Web Interface
+
+The web interface provides a visual database management system accessible at `http://localhost:3000`.
+
+#### Database Selector
+
+Located in the top-right corner of the interface:
+
+- **Current Database Dropdown**: Shows active database name
+- **Switch Database**: Click dropdown and select different database
+- **Visual Indicator**: Current database highlighted in the dropdown
+- **Auto-Refresh**: All tabs refresh when database changes
+
+#### Database Management Panel
+
+Click "Manage Databases" button to open the management interface:
+
+**Create New Database:**
+1. Click "+ Create New Database" button
+2. Enter database name in modal dialog
+3. Click "Create" - new database appears in the list
+4. Success notification confirms creation
+
+**View Database List:**
+- Card-based layout showing all databases
+- Each card displays:
+  - Database name
+  - Storage path (e.g., `./data/production`)
+  - Current database badge (if active)
+  - Action buttons (Switch, Delete)
+
+**Switch Database:**
+1. Find target database in the list
+2. Click "Switch" button
+3. System automatically:
+   - Saves current database
+   - Loads target database
+   - Refreshes all tabs (Records, Tables, Statistics)
+   - Updates database selector
+
+**Delete Database:**
+1. Click "Delete" button on database card
+2. Confirm deletion in dialog (cannot delete current database)
+3. Database removed from list and storage deleted
+
+**Visual Features:**
+- Clean card-based UI with gradient styling
+- Current database highlighted with badge
+- Disabled delete button for active database
+- Real-time status messages
+- Modal dialogs for create/confirm operations
+
+### Managing Databases via API
+
+For programmatic access, the system exposes RESTful endpoints:
+
+#### GET /api/databases
+List all available databases:
+
+```bash
+curl http://localhost:3000/api/databases
+```
+
+**Response:**
+```json
+{
+  "databases": ["default", "production", "development", "analytics"],
+  "current": "default"
+}
+```
+
+#### POST /api/databases
+Create a new database:
+
+```bash
+curl -X POST http://localhost:3000/api/databases \
+  -H "Content-Type: application/json" \
+  -d '{"name": "testing"}'
+```
+
+**Response:**
+```json
+{
+  "message": "Database 'testing' created",
+  "path": "./data/testing"
+}
+```
+
+#### POST /api/databases/switch
+Switch to a different database:
+
+```bash
+curl -X POST http://localhost:3000/api/databases/switch \
+  -H "Content-Type: application/json" \
+  -d '{"name": "production"}'
+```
+
+**Response:**
+```json
+{
+  "message": "Switched to database 'production'",
+  "database": "production"
+}
+```
+
+#### DELETE /api/databases/:name
+Delete a database:
+
+```bash
+curl -X DELETE http://localhost:3000/api/databases/testing
+```
+
+**Response:**
+```json
+{
+  "message": "Database 'testing' deleted"
+}
+```
+
+**API Validation:**
+- All endpoints validate database names
+- Cannot delete current or default database
+- Returns appropriate HTTP status codes (200, 400, 404, 500)
+- JSON error messages for failures
+
+### Use Cases for Multi-Database
+
+**1. Environment Separation:**
+```bash
+# Development work
+RDBMS> CREATE DATABASE development
+RDBMS> USE DATABASE development
+# ... work on features ...
+
+# Production deployment
+RDBMS> CREATE DATABASE production
+RDBMS> USE DATABASE production
+# ... production data ...
+```
+
+**2. Project Organization:**
+```bash
+# Different projects in same system
+RDBMS> CREATE DATABASE project_alpha
+RDBMS> CREATE DATABASE project_beta
+RDBMS> USE DATABASE project_alpha
+```
+
+**3. Testing & Quality Assurance:**
+```bash
+# Create isolated test database
+RDBMS> CREATE DATABASE test_suite
+RDBMS> USE DATABASE test_suite
+# ... run tests ...
+RDBMS> DROP DATABASE test_suite
+```
+
+**4. Data Analytics:**
+```bash
+# Separate analytics database
+RDBMS> CREATE DATABASE analytics
+RDBMS> USE DATABASE analytics
+CREATE TABLE metrics (...)
+INSERT INTO metrics ...
+```
+
+### Database Isolation
+
+Each database maintains complete isolation:
+
+- **Tables**: Separate table registries (no name conflicts)
+- **Records**: Independent data storage
+- **Backups**: Database-specific backup files
+- **Transactions**: Separate transaction logs
+- **Schema**: Different table structures allowed
+
+**Example of Isolation:**
+```bash
+# Database 'app1' has 'users' table
+RDBMS> USE DATABASE app1
+RDBMS> CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR)
+
+# Database 'app2' can have different 'users' table
+RDBMS> USE DATABASE app2
+RDBMS> CREATE TABLE users (user_id INT PRIMARY KEY, email VARCHAR, age INT)
+# No conflict - completely isolated
+```
+
+### Best Practices
+
+**Naming Conventions:**
+- Use descriptive names: `production`, `development`, `staging`
+- Allowed characters: letters, numbers, hyphens, underscores
+- Avoid special characters or spaces
+- Keep names short and meaningful
+
+**Workflow Recommendations:**
+1. **Always have a 'default' database** - It's created automatically and protected from deletion
+2. **Create environment-specific databases** - Separate dev/test/prod data
+3. **Use SHOW DATABASES frequently** - Know which database you're in
+4. **Save before switching** - System auto-saves, but manual SAVE is safe
+5. **Backup before DROP** - Create backup if you might need the data later
+6. **Test in isolated databases** - Use temporary databases for experiments
+
+**Safety Guidelines:**
+- Cannot drop current database (switch first)
+- Cannot drop 'default' database (system protection)
+- DROP DATABASE requires confirmation
+- Web interface disables delete for current database
+- All operations logged to transaction.log
+
+### Technical Implementation
+
+**Storage Engine Multi-Database Support:**
+- Static methods in `StorageEngine` class
+- `listDatabases()` - Scans `./data/` directory
+- `createDatabase(name)` - Creates directory structure
+- `dropDatabase(name)` - Removes database directory
+- Backward compatibility with old single-file format
+
+**Database Class Extensions:**
+- `getDatabaseName()` - Returns current database name
+- `setDatabaseName(name)` - Updates database identifier
+- Auto-saves current database before loading new one
+- Maintains database context in memory
+
+**REPL Command Handlers:**
+- Pattern matching for database commands
+- Input validation and error handling
+- User-friendly confirmation prompts
+- Colored output for better UX
+
+**Web Interface Components:**
+- Database selector dropdown (persistent across all tabs)
+- Database management modal (create/view/delete)
+- API integration for all database operations
+- Real-time UI updates on database changes
+
 ## Architecture
 
 ```
