@@ -357,6 +357,8 @@ async function addRecord(event) {
     }
 }
 
+let editingRecord = null;
+
 async function editRecord(record) {
     const primaryKeyCol = currentTableSchema.find(col => col.isPrimaryKey);
     
@@ -365,22 +367,75 @@ async function editRecord(record) {
         return;
     }
 
+    // Store the original record for submission
+    editingRecord = record;
+    
+    // Generate form fields
+    const fieldsContainer = document.getElementById('edit-record-fields');
+    fieldsContainer.innerHTML = currentTableSchema.map(col => {
+        const isPK = col.isPrimaryKey;
+        const isUnique = col.isUnique;
+        const currentValue = record[col.name] || '';
+        
+        return `
+            <div class="form-group">
+                <label for="edit-${col.name}">
+                    <span>${col.name}</span>
+                    <span class="field-type">${col.dataType}</span>
+                    ${isPK ? '<span class="field-badge badge-pk">PRIMARY KEY</span>' : ''}
+                    ${isUnique && !isPK ? '<span class="field-badge badge-unique">UNIQUE</span>' : ''}
+                    ${isPK ? '<span class="field-badge badge-readonly">READ-ONLY</span>' : ''}
+                </label>
+                <input 
+                    type="${getInputType(col.dataType)}" 
+                    id="edit-${col.name}" 
+                    name="${col.name}"
+                    value="${currentValue}"
+                    ${isPK ? 'disabled' : ''}
+                    ${!isPK ? 'required' : ''}
+                    placeholder="${isPK ? 'Cannot edit primary key' : 'Enter ' + col.name}"
+                >
+                ${isPK ? '<small>Primary keys cannot be modified</small>' : ''}
+            </div>
+        `;
+    }).join('');
+    
+    // Show modal
+    document.getElementById('edit-record-modal').style.display = 'block';
+}
+
+function closeEditRecordModal() {
+    document.getElementById('edit-record-modal').style.display = 'none';
+    editingRecord = null;
+}
+
+async function submitEditRecord(event) {
+    event.preventDefault();
+    
+    if (!editingRecord) {
+        showMessage('No record to edit', 'error');
+        return;
+    }
+    
+    const primaryKeyCol = currentTableSchema.find(col => col.isPrimaryKey);
     const newValues = {};
     let hasChanges = false;
 
+    // Collect new values from form
     for (const col of currentTableSchema) {
         if (col.isPrimaryKey) continue;
 
-        const currentValue = record[col.name];
-        const newValue = prompt(`Edit ${col.name} (${col.dataType}):`, currentValue);
+        const input = document.getElementById(`edit-${col.name}`);
+        const newValue = input.value;
+        const currentValue = editingRecord[col.name];
         
-        if (newValue !== null && newValue !== currentValue) {
+        if (newValue !== currentValue) {
             hasChanges = true;
             if (col.dataType === 'INT') {
                 const num = parseInt(newValue, 10);
                 newValues[col.name] = isNaN(num) ? null : num;
             } else if (col.dataType === 'BOOLEAN') {
-                newValues[col.name] = newValue === 'true' || newValue === '1';
+                newValues[col.name] = input.checked || newValue === 'true' || newValue === '1';
             } else if (col.dataType === 'DATE') {
                 newValues[col.name] = newValue ? new Date(newValue).toISOString() : null;
             } else {
@@ -391,6 +446,7 @@ async function editRecord(record) {
 
     if (!hasChanges) {
         showMessage('No changes made', 'info');
+        closeEditRecordModal();
         return;
     }
 
@@ -403,7 +459,7 @@ async function editRecord(record) {
                 condition: {
                     column: primaryKeyCol.name,
                     operator: '=',
-                    value: record[primaryKeyCol.name]
+                    value: editingRecord[primaryKeyCol.name]
                 }
             })
         });
@@ -413,8 +469,9 @@ async function editRecord(record) {
             throw new Error(error.error);
         }
 
-        showMessage('Record updated successfully!', 'success');
-        loadRecords();
+        showMessage('✓ Record updated successfully', 'success');
+        closeEditRecordModal();
+        await loadRecords();
     } catch (error) {
         showMessage('Error updating record: ' + error.message, 'error');
     }
@@ -993,11 +1050,15 @@ window.showTab = function(tabName) {
 window.onclick = function(event) {
     const createModal = document.getElementById('create-database-modal');
     const managementModal = document.getElementById('database-management-modal');
+    const editModal = document.getElementById('edit-record-modal');
     
     if (event.target === createModal) {
         closeCreateDatabaseModal();
     }
     if (event.target === managementModal) {
         closeDatabaseManagementPanel();
+    }
+    if (event.target === editModal) {
+        closeEditRecordModal();
     }
 };

@@ -139,6 +139,81 @@ header p {
 .form-group select:focus {
     outline: none;
     border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.form-group small {
+    display: block;
+    margin-top: 5px;
+    color: #666;
+    font-size: 0.85em;
+}
+
+/* Edit Record Form Specific Styles */
+#edit-record-fields {
+    max-height: 500px;
+    overflow-y: auto;
+    padding-right: 10px;
+}
+
+#edit-record-fields .form-group {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 8px;
+    border-left: 4px solid #667eea;
+}
+
+#edit-record-fields .form-group label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+#edit-record-fields .field-type {
+    font-size: 0.85em;
+    color: #667eea;
+    background: rgba(102, 126, 234, 0.1);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: normal;
+}
+
+#edit-record-fields .field-badge {
+    font-size: 0.75em;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-weight: 600;
+}
+
+#edit-record-fields .badge-pk {
+    background: #ffd700;
+    color: #333;
+}
+
+#edit-record-fields .badge-unique {
+    background: #4CAF50;
+    color: white;
+}
+
+#edit-record-fields .badge-readonly {
+    background: #e0e0e0;
+    color: #666;
+}
+
+#edit-record-fields input:disabled {
+    background: #f0f0f0;
+    cursor: not-allowed;
+    color: #999;
+}
+
+.form-actions {
+    display: flex;
+    gap: 15px;
+    justify-content: flex-end;
+    margin-top: 25px;
+    padding-top: 20px;
+    border-top: 2px solid #e0e0e0;
 }
 
 .column-def {

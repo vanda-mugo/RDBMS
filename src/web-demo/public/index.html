@@ -192,3 +192,20 @@
     </div>
 </div>
 
+<!-- Edit Record Modal -->
+<div id="edit-record-modal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeEditRecordModal()">&times;</span>
+        <h2>Edit Record</h2>
+        <form id="edit-record-form" onsubmit="submitEditRecord(event)">
+            <div id="edit-record-fields">
+                <!-- Fields will be dynamically generated -->
+            </div>
+            <div class="form-actions">
+                <button type="submit" class="btn-primary">Save Changes</button>
+                <button type="button" onclick="closeEditRecordModal()" class="btn-secondary">Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>
+
