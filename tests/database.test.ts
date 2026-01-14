@@ -1,5 +1,7 @@
 import Database from "../src/core/database";
 import { Column } from "../src/core/column";
+import { Index } from "../src/core/index";
+import { Table } from "../src/core/table";
 
 /**
  * DATABASE TEST SUITE DOCUMENTATION
@@ -205,5 +207,186 @@ describe("Database CRUD Operations", () => {
     expect(() => db.query("nonexistent", () => true)).toThrow(
       "Table nonexistent does not exist"
     );
+  });
+});
+
+/**
+ * INDEX REGISTRY TEST SUITE
+ *
+ * Validates database-level index management operations:
+ * - Adding indexes to registry
+ * - Removing indexes (DROP INDEX)
+ * - Finding indexes by name, table, or column
+ * - Listing all indexes
+ */
+describe("Database Index Registry", () => {
+  let db: Database;
+  let table: Table;
+
+  beforeEach(() => {
+    db = new Database();
+    db.connect();
+    db.createTable("users", [
+      new Column("id", "INT", true),
+      new Column("age", "INT"),
+      new Column("email", "VARCHAR"),
+    ]);
+    table = db.getTable("users")!;
+    table.insert({ id: 1, age: 25, email: "alice@example.com" });
+    table.insert({ id: 2, age: 30, email: "bob@example.com" });
+  });
+
+  /**
+   * TEST: Add index to registry
+   */
+  test("should add index to registry", () => {
+    const ageIndex = new Index("users", "age", "idx_age");
+    ageIndex.createIndex(table.selectAll());
+
+    db.addIndex("idx_age", ageIndex);
+
+    expect(db.hasIndex("idx_age")).toBe(true);
+    expect(db.getIndex("idx_age")).toBe(ageIndex);
+  });
+
+  /**
+   * TEST: Prevent duplicate index names
+   */
+  test("should throw error on duplicate index name", () => {
+    const index1 = new Index("users", "age", "idx_age");
+    const index2 = new Index("users", "email", "idx_age");
+
+    db.addIndex("idx_age", index1);
+
+    expect(() => {
+      db.addIndex("idx_age", index2);
+    }).toThrow("Index 'idx_age' already exists");
+  });
+
+  /**
+   * TEST: Drop index from registry
+   */
+  test("should drop index from registry", () => {
+    const ageIndex = new Index("users", "age", "idx_age");
+    ageIndex.createIndex(table.selectAll());
+    db.addIndex("idx_age", ageIndex);
+
+    expect(db.hasIndex("idx_age")).toBe(true);
+
+    db.dropIndex("idx_age");
+
+    expect(db.hasIndex("idx_age")).toBe(false);
+    expect(db.getIndex("idx_age")).toBeUndefined();
+  });
+
+  /**
+   * TEST: Error on dropping non-existent index
+   */
+  test("should throw error when dropping non-existent index", () => {
+    expect(() => {
+      db.dropIndex("nonexistent_idx");
+    }).toThrow("Index 'nonexistent_idx' does not exist");
+  });
+
+  /**
+   * TEST: Get all indexes
+   */
+  test("should return all indexes", () => {
+    const ageIndex = new Index("users", "age", "idx_age");
+    const emailIndex = new Index("users", "email", "idx_email");
+
+    ageIndex.createIndex(table.selectAll());
+    emailIndex.createIndex(table.selectAll());
+
+    db.addIndex("idx_age", ageIndex);
+    db.addIndex("idx_email", emailIndex);
+
+    const allIndexes = db.getIndexes();
+
+    expect(allIndexes).toHaveLength(2);
+    expect(allIndexes).toContain(ageIndex);
+    expect(allIndexes).toContain(emailIndex);
+  });
+
+  /**
+   * TEST: Get indexes filtered by table
+   */
+  test("should return indexes for specific table", () => {
+    const ageIndex = new Index("users", "age", "idx_age");
+    const emailIndex = new Index("users", "email", "idx_email");
+    const productIndex = new Index("products", "price", "idx_price");
+
+    db.addIndex("idx_age", ageIndex);
+    db.addIndex("idx_email", emailIndex);
+    db.addIndex("idx_price", productIndex);
+
+    const userIndexes = db.getIndexes("users");
+
+    expect(userIndexes).toHaveLength(2);
+    expect(userIndexes).toContain(ageIndex);
+    expect(userIndexes).toContain(emailIndex);
+    expect(userIndexes).not.toContain(productIndex);
+  });
+
+  /**
+   * TEST: Find index for specific column (query optimizer use case)
+   */
+  test("should find index for specific table column", () => {
+    const ageIndex = new Index("users", "age", "idx_age");
+    const emailIndex = new Index("users", "email", "idx_email");
+
+    ageIndex.createIndex(table.selectAll());
+    emailIndex.createIndex(table.selectAll());
+
+    db.addIndex("idx_age", ageIndex);
+    db.addIndex("idx_email", emailIndex);
+
+    const foundIndex = db.getIndexForColumn("users", "age");
+
+    expect(foundIndex).toBe(ageIndex);
+  });
+
+  /**
+   * TEST: Return undefined when no index exists for column
+   */
+  test("should return undefined when no index for column", () => {
+    const ageIndex = new Index("users", "age", "idx_age");
+    db.addIndex("idx_age", ageIndex);
+
+    const foundIndex = db.getIndexForColumn("users", "email");
+
+    expect(foundIndex).toBeUndefined();
+  });
+
+  /**
+   * TEST: Case-insensitive table and column matching
+   */
+  test("should match indexes case-insensitively", () => {
+    const ageIndex = new Index("users", "age", "idx_age");
+    db.addIndex("idx_age", ageIndex);
+
+    // Mixed case queries should still find the index
+    expect(db.getIndexForColumn("USERS", "AGE")).toBe(ageIndex);
+    expect(db.getIndexForColumn("Users", "Age")).toBe(ageIndex);
+
+    const userIndexes = db.getIndexes("USERS");
+    expect(userIndexes).toHaveLength(1);
+  });
+
+  /**
+   * TEST: List index names
+   */
+  test("should list all index names", () => {
+    const ageIndex = new Index("users", "age", "idx_age");
+    const emailIndex = new Index("users", "email", "idx_email");
+
+    db.addIndex("idx_age", ageIndex);
+    db.addIndex("idx_email", emailIndex);
+
+    const names = db.listIndexNames();
+
+    expect(names).toContain("idx_age");
+    expect(names).toContain("idx_email");
+    expect(names).toHaveLength(2);
   });
 });

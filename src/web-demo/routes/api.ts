@@ -2,11 +2,13 @@ import express, { Express, Request, Response } from "express";
 import Database from "../../core/database";
 import { Column } from "../../core/column";
 import { StorageEngine } from "../../core/storage-engine";
+import { QueryExecutor } from "../../core/query-executor";
 
 // Use default database for web interface
 let currentDatabaseName = "default";
 let db = new Database(currentDatabaseName);
 let storage = new StorageEngine("./data", currentDatabaseName);
+let queryExecutor = new QueryExecutor(db);
 
 // Concurrency flag for sync operations
 let isSyncing = false;
@@ -181,6 +183,7 @@ export function setRoutes(app: Express) {
       currentDatabaseName = name;
       db.setDatabaseName(name);
       storage = new StorageEngine("./data", name);
+      queryExecutor = new QueryExecutor(db); // Update query executor
 
       // Load the new database
       console.log(` Loading database '${name}'...`);
@@ -648,6 +651,148 @@ export function setRoutes(app: Express) {
       res.status(500).json({ error: (error as Error).message });
     } finally {
       isSyncing = false;
+    }
+  });
+
+  // ==================== INDEX MANAGEMENT ====================
+
+  // Get all indexes or indexes for a specific table
+  app.get("/api/indexes", (req: Request, res: Response) => {
+    try {
+      const { table } = req.query;
+      let result;
+
+      if (table && typeof table === "string") {
+        // Get indexes for specific table
+        result = queryExecutor.execute(`SHOW INDEXES ON ${table}`);
+      } else {
+        // Get all indexes
+        result = queryExecutor.execute("SHOW INDEXES");
+      }
+
+      res.json({
+        indexes: result,
+        count: result.length,
+        table: table || "all",
+      });
+    } catch (error) {
+      console.error("Error getting indexes:", error);
+      res.status(500).json({
+        error: "Failed to get indexes",
+        message: (error as Error).message,
+      });
+    }
+  });
+
+  // Create an index
+  app.post("/api/indexes", (req: Request, res: Response) => {
+    try {
+      const { indexName, tableName, columnName, unique } = req.body;
+
+      if (!indexName || !tableName || !columnName) {
+        return res.status(400).json({
+          error: "Missing required fields",
+          required: ["indexName", "tableName", "columnName"],
+        });
+      }
+
+      // Execute CREATE INDEX command with optional UNIQUE keyword
+      const uniqueKeyword = unique ? "UNIQUE " : "";
+      const sql = `CREATE ${uniqueKeyword}INDEX ${indexName} ON ${tableName}(${columnName})`;
+      const result = queryExecutor.execute(sql);
+
+      // Save database after creating index
+      storage.saveDatabase(db);
+
+      res.json({
+        success: true,
+        message: result.message,
+        index: {
+          name: indexName,
+          table: tableName,
+          column: columnName,
+          unique: unique || false,
+        },
+      });
+    } catch (error) {
+      console.error("Error creating index:", error);
+      res.status(500).json({
+        error: "Failed to create index",
+        message: (error as Error).message,
+      });
+    }
+  });
+
+  // Drop an index
+  app.delete("/api/indexes/:indexName", (req: Request, res: Response) => {
+    try {
+      const { indexName } = req.params;
+      const { tableName } = req.body;
+
+      if (!tableName) {
+        return res.status(400).json({
+          error: "Missing required field: tableName",
+        });
+      }
+
+      // Execute DROP INDEX command
+      const sql = `DROP INDEX ${indexName} ON ${tableName}`;
+      const result = queryExecutor.execute(sql);
+
+      // Save database after dropping index
+      storage.saveDatabase(db);
+
+      res.json({
+        success: true,
+        message: result.message,
+      });
+    } catch (error) {
+      console.error("Error dropping index:", error);
+      res.status(500).json({
+        error: "Failed to drop index",
+        message: (error as Error).message,
+      });
+    }
+  });
+
+  // Execute arbitrary SQL (including index commands)
+  app.post("/api/sql", (req: Request, res: Response) => {
+    try {
+      const { query } = req.body;
+
+      if (!query) {
+        return res.status(400).json({
+          error: "Missing required field: query",
+        });
+      }
+
+      // Execute SQL using QueryExecutor
+      const result = queryExecutor.execute(query);
+
+      // Auto-save after data modifications and index operations
+      const upperQuery = query.trim().toUpperCase();
+      if (
+        upperQuery.startsWith("INSERT") ||
+        upperQuery.startsWith("UPDATE") ||
+        upperQuery.startsWith("DELETE") ||
+        upperQuery.startsWith("CREATE") ||
+        upperQuery.startsWith("DROP")
+      ) {
+        storage.saveDatabase(db);
+      }
+
+      res.json({
+        success: true,
+        result: result,
+        query: query,
+      });
+    } catch (error) {
+      console.error("SQL execution error:", error);
+      res.status(500).json({
+        error: "SQL execution failed",
+        message: (error as Error).message,
+        query: req.body.query,
+      });
     }
   });
 }

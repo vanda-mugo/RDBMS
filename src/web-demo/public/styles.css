@@ -382,6 +382,21 @@ tbody tr:hover {
     margin-left: 5px;
 }
 
+.badge-unique {
+    background: #10b981;
+    color: white;
+}
+
+.badge-no {
+    display: inline-block;
+    padding: 3px 8px;
+    background: #e5e7eb;
+    color: #6b7280;
+    border-radius: 4px;
+    font-size: 0.75em;
+    font-weight: 500;
+}
+
 /* Statistics */
 .stats-grid {
     display: grid;
@@ -740,4 +755,86 @@ tbody tr:hover {
     .database-actions {
         flex-direction: column;
     }
+}
+
+/* Index Management Styles */
+#indexes-table {
+    width: 100%;
+    margin-top: 20px;
+}
+
+#indexes-table code {
+    background: #f4f4f4;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9em;
+    color: #c7254e;
+}
+
+.sql-result {
+    margin-top: 20px;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    min-height: 50px;
+}
+
+.sql-result .success {
+    color: #28a745;
+    margin: 10px 0;
+}
+
+.sql-result .error {
+    color: #dc3545;
+    margin: 10px 0;
+}
+
+.result-table {
+    width: 100%;
+    margin: 15px 0;
+    border-collapse: collapse;
+}
+
+.result-table th,
+.result-table td {
+    padding: 10px;
+    border: 1px solid #ddd;
+    text-align: left;
+}
+
+.result-table th {
+    background: #667eea;
+    color: white;
+    font-weight: 600;
+}
+
+.result-table tbody tr:nth-child(even) {
+    background: #f8f9fa;
+}
+
+.result-table tbody tr:hover {
+    background: #e9ecef;
+}
+
+#sql-query {
+    width: 100%;
+    padding: 15px;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    resize: vertical;
+    margin-bottom: 10px;
+}
+
+#sql-query:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
+.controls label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }

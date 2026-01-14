@@ -1102,6 +1102,9 @@ window.showTab = function(tabName) {
     originalShowTab(tabName);
     if (tabName === 'databases') {
         loadDatabases();
+    } else if (tabName === 'indexes') {
+        loadIndexes();
+        populateIndexTableSelects();
     }
 };
 
@@ -1121,3 +1124,205 @@ window.onclick = function(event) {
         closeEditRecordModal();
     }
 };
+
+// ==================== INDEX MANAGEMENT ====================
+
+async function loadIndexes() {
+    try {
+        const filterTable = document.getElementById('index-filter-table')?.value || '';
+        const url = filterTable ? `/api/indexes?table=${filterTable}` : '/api/indexes';
+        
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        const tbody = document.getElementById('indexes-tbody');
+        
+        if (!data.indexes || data.indexes.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6">No indexes found</td></tr>';
+            return;
+        }
+        
+        tbody.innerHTML = data.indexes.map(idx => `
+            <tr>
+                <td>${idx.table}</td>
+                <td><code>${idx.name}</code></td>
+                <td>${idx.column}</td>
+                <td><span class="badge">${idx.type}</span></td>
+                <td>${idx.unique ? '<span class="badge badge-unique">UNIQUE</span>' : '<span class="badge-no">No</span>'}</td>
+                <td>
+                    <button onclick="dropIndex('${idx.name}', '${idx.table}')" class="btn-danger btn-sm">Drop</button>
+                </td>
+            </tr>
+        `).join('');
+        
+        showMessage(`Loaded ${data.indexes.length} index(es)`, 'success');
+    } catch (error) {
+        showMessage('Error loading indexes: ' + error.message, 'error');
+    }
+}
+
+async function populateIndexTableSelects() {
+    try {
+        const response = await fetch('/api/tables');
+        const data = await response.json();
+        const tables = data.tables || data;
+        
+        // Populate create index form table select
+        const createSelect = document.getElementById('index-table-select');
+        createSelect.innerHTML = '<option value="">Select a table...</option>' + 
+            tables.map(t => `<option value="${t.name}">${t.name}</option>`).join('');
+        
+        // Populate filter select
+        const filterSelect = document.getElementById('index-filter-table');
+        filterSelect.innerHTML = '<option value="">All tables</option>' + 
+            tables.map(t => `<option value="${t.name}">${t.name}</option>`).join('');
+    } catch (error) {
+        showMessage('Error loading tables: ' + error.message, 'error');
+    }
+}
+
+async function loadTableColumns() {
+    const tableName = document.getElementById('index-table-select').value;
+    const columnSelect = document.getElementById('index-column-select');
+    
+    if (!tableName) {
+        columnSelect.innerHTML = '<option value="">Select a column...</option>';
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/tables');
+        const data = await response.json();
+        const tables = data.tables || data;
+        const table = tables.find(t => t.name === tableName);
+        
+        if (!table || !table.columns) {
+            columnSelect.innerHTML = '<option value="">No columns found</option>';
+            return;
+        }
+        
+        columnSelect.innerHTML = '<option value="">Select a column...</option>' +
+            table.columns.map(col => `<option value="${col.name}">${col.name} (${col.dataType})</option>`).join('');
+    } catch (error) {
+        showMessage('Error loading columns: ' + error.message, 'error');
+    }
+}
+
+async function createIndex(event) {
+    event.preventDefault();
+    
+    const tableName = document.getElementById('index-table-select').value;
+    const columnName = document.getElementById('index-column-select').value;
+    const indexName = document.getElementById('index-name').value;
+    const unique = document.getElementById('index-unique').checked;
+    
+    if (!tableName || !columnName || !indexName) {
+        showMessage('Please fill in all fields', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/indexes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ indexName, tableName, columnName, unique })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            showMessage(`✓ ${data.message}`, 'success');
+            document.getElementById('create-index-form').reset();
+            loadIndexes();
+        } else {
+            showMessage(`Error: ${data.message}`, 'error');
+        }
+    } catch (error) {
+        showMessage('Error creating index: ' + error.message, 'error');
+    }
+}
+
+async function dropIndex(indexName, tableName) {
+    if (!confirm(`Are you sure you want to drop index '${indexName}'?`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/indexes/${indexName}`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tableName })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            showMessage(`✓ ${data.message}`, 'success');
+            loadIndexes();
+        } else {
+            showMessage(`Error: ${data.message}`, 'error');
+        }
+    } catch (error) {
+        showMessage('Error dropping index: ' + error.message, 'error');
+    }
+}
+
+async function executeSQLQuery() {
+    const query = document.getElementById('sql-query').value.trim();
+    const resultDiv = document.getElementById('sql-result');
+    
+    if (!query) {
+        showMessage('Please enter a SQL query', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/sql', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            // Display result
+            if (Array.isArray(data.result)) {
+                // SELECT or SHOW INDEXES result
+                if (data.result.length === 0) {
+                    resultDiv.innerHTML = '<p class="success">Query executed successfully. No results returned.</p>';
+                } else {
+                    const headers = Object.keys(data.result[0]);
+                    const tableHtml = `
+                        <table class="result-table">
+                            <thead>
+                                <tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr>
+                            </thead>
+                            <tbody>
+                                ${data.result.map(row => `
+                                    <tr>${headers.map(h => `<td>${row[h]}</td>`).join('')}</tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                        <p class="success">${data.result.length} row(s) returned</p>
+                    `;
+                    resultDiv.innerHTML = tableHtml;
+                }
+            } else if (data.result && typeof data.result === 'object' && data.result.success) {
+                // CREATE INDEX or DROP INDEX result
+                resultDiv.innerHTML = `<p class="success">✓ ${data.result.message}</p>`;
+            } else {
+                resultDiv.innerHTML = `<p class="success">Query executed successfully</p>`;
+            }
+            
+            showMessage('SQL executed successfully', 'success');
+            loadIndexes(); // Refresh indexes if it was an index command
+        } else {
+            resultDiv.innerHTML = `<p class="error">Error: ${data.message}</p>`;
+            showMessage(`SQL Error: ${data.message}`, 'error');
+        }
+    } catch (error) {
+        resultDiv.innerHTML = `<p class="error">Error: ${error.message}</p>`;
+        showMessage('Error executing SQL: ' + error.message, 'error');
+    }
+}

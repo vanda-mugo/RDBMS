@@ -3,6 +3,27 @@ import * as path from "path";
 import Database from "./database";
 import { Table } from "./table";
 import { Column } from "./column";
+import { Index } from "./index";
+
+/**
+ * PERSISTENT INDEX FORMAT DESIGN
+ *
+ * WHY: Indexes must survive database restarts. We store index definitions
+ * (not the data) so they can be rebuilt on load.
+ *
+ * DESIGN DECISION: Store only metadata, not the indexMap itself, because:
+ * 1. Index data can be rebuilt from table records on load
+ * 2. Storing index data would duplicate all records (waste space)
+ * 3. Rebuilding ensures index is in sync with current data
+ *
+ * SCHEMA: Each table has an optional "indexes" array containing index definitions
+ */
+interface SerializedIndex {
+  name: string; // e.g., "idx_users_age" or "unique_email_idx"
+  columnName: string; // Column being indexed, e.g., "age"
+  type: string; // Index type: "HASH" (future: "BTREE", "FULLTEXT")
+  unique: boolean; // Whether index enforces uniqueness
+}
 
 interface SerializedDatabase {
   tables: {
@@ -14,6 +35,7 @@ interface SerializedDatabase {
         isUnique: boolean;
       }[];
       records: any[];
+      indexes?: SerializedIndex[]; // NEW: Index definitions per table
     };
   };
   metadata: {
@@ -136,6 +158,12 @@ export class StorageEngine {
       const table = database.getTable(tableName);
 
       if (table) {
+        // Get all indexes for this table
+        const tableIndexes = database.getIndexes(tableName);
+        const serializedIndexes = tableIndexes.map((index) =>
+          index.serialize()
+        );
+
         tables[tableName] = {
           columns: table.getColumns().map((col: Column) => ({
             name: col.name,
@@ -144,6 +172,8 @@ export class StorageEngine {
             isUnique: col.isUnique,
           })),
           records: table.selectAll(),
+          // Include index definitions if any exist
+          ...(serializedIndexes.length > 0 && { indexes: serializedIndexes }),
         };
       }
     }
@@ -179,10 +209,31 @@ export class StorageEngine {
 
       // Create table
       database.createTable(tableName, columns);
+      const table = database.getTable(tableName);
 
       // Insert records
       for (const record of tableData.records) {
         database.insert(tableName, record);
+      }
+
+      // Recreate indexes if they exist
+      if (tableData.indexes && tableData.indexes.length > 0 && table) {
+        for (const indexDef of tableData.indexes) {
+          // Create new index with metadata from serialized definition
+          const index = new Index(
+            tableName,
+            indexDef.columnName,
+            indexDef.name,
+            indexDef.unique
+          );
+
+          // Build index from all table records
+          index.createIndex(table.selectAll());
+
+          // Register index with database and table
+          database.addIndex(indexDef.name, index);
+          table.registerIndex(index);
+        }
       }
     }
   }

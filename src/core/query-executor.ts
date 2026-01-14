@@ -7,13 +7,19 @@ interface ParsedQuery {
     | "UPDATE"
     | "DELETE"
     | "CREATE_TABLE"
-    | "DROP_TABLE";
+    | "DROP_TABLE"
+    | "CREATE_INDEX"
+    | "DROP_INDEX"
+    | "SHOW_INDEXES";
   tableName?: string;
   columns?: string[];
   values?: any[];
   data?: { [key: string]: any };
   where?: WhereClause;
   joins?: JoinClause[];
+  indexName?: string;
+  columnName?: string;
+  unique?: boolean;
 }
 
 interface WhereClause {
@@ -55,6 +61,12 @@ export class QueryExecutor {
         return this.executeCreateTable(parsedQuery);
       case "DROP_TABLE":
         return this.executeDropTable(parsedQuery);
+      case "CREATE_INDEX":
+        return this.executeCreateIndex(parsedQuery);
+      case "DROP_INDEX":
+        return this.executeDropIndex(parsedQuery);
+      case "SHOW_INDEXES":
+        return this.executeShowIndexes(parsedQuery);
       default:
         throw new Error(`Unsupported query type: ${parsedQuery.type}`);
     }
@@ -78,6 +90,12 @@ export class QueryExecutor {
       return this.parseCreateTable(query);
     } else if (trimmedQuery.startsWith("DROP TABLE")) {
       return this.parseDropTable(query);
+    } else if (trimmedQuery.startsWith("CREATE UNIQUE INDEX") || trimmedQuery.startsWith("CREATE INDEX")) {
+      return this.parseCreateIndex(query);
+    } else if (trimmedQuery.startsWith("DROP INDEX")) {
+      return this.parseDropIndex(query);
+    } else if (trimmedQuery.startsWith("SHOW INDEXES")) {
+      return this.parseShowIndexes(query);
     } else {
       throw new Error("Unable to parse query");
     }
@@ -244,7 +262,8 @@ export class QueryExecutor {
   private parseWhere(whereStr: string): WhereClause {
     // Simple WHERE parsing (supports single condition for now)
     // age > 25 or name = 'Alice'
-    const conditionRegex = /(\w+)\s*(=|>|<|>=|<=|!=)\s*(.+)/;
+    // IMPORTANT: Match longer operators (>=, <=, !=) before shorter ones (>, <, =)
+    const conditionRegex = /(\w+)\s*(>=|<=|!=|=|>|<)\s*(.+)/;
     const match = whereStr.trim().match(conditionRegex);
 
     if (!match) {
@@ -298,7 +317,13 @@ export class QueryExecutor {
   }
 
   /**
-   * Execute SELECT query
+   * Execute SELECT query with index optimization
+   *
+   * OPTIMIZATION STRATEGY:
+   * 1. If WHERE clause exists, check if an index is available for the column
+   * 2. For equality (=) operator: Use index.search() - O(1) lookup
+   * 3. For range operators (>, <, >=, <=): Use index.rangeSearch() if supported
+   * 4. Fall back to full table scan if no index or unsupported operator
    */
   private executeSelect(parsedQuery: ParsedQuery): any[] {
     const { tableName, columns, where } = parsedQuery;
@@ -311,10 +336,62 @@ export class QueryExecutor {
     let results: any[];
 
     if (where) {
-      results = this.database.query(tableName, (record: any) =>
-        this.evaluateCondition(record, where)
-      );
+      // INDEX OPTIMIZATION: Try to use index for WHERE clause
+      const index = this.database.getIndexForColumn(tableName, where.column);
+
+      if (index && where.operator === "=") {
+        //  INDEX PATH: O(1) hash lookup for equality
+        results = index.search(where.value);
+
+        // Note: index.search() returns matching records directly
+        // No need for additional filtering
+      } else if (
+        index &&
+        (where.operator === ">" ||
+          where.operator === "<" ||
+          where.operator === ">=" ||
+          where.operator === "<=")
+      ) {
+        //  INDEX PATH: Range search (if index supports it)
+        try {
+          // NOTE: index.rangeSearch(min, max) uses INCLUSIVE bounds (min <= key <= max)
+          // We need to adjust bounds for EXCLUSIVE operators (>, <)
+
+          let min: any = undefined;
+          let max: any = undefined;
+
+          if (where.operator === ">=" || where.operator === ">") {
+            min = where.value;
+          }
+
+          if (where.operator === "<=" || where.operator === "<") {
+            max = where.value;
+          }
+
+          results = index.rangeSearch(min, max);
+
+          // Post-filter for EXCLUSIVE operators (>, <)
+          // rangeSearch is inclusive, so we need to exclude boundary values
+          if (where.operator === ">" || where.operator === "<") {
+            results = results.filter((record: any) =>
+              this.evaluateCondition(record, where)
+            );
+          }
+          // Note: >= and <= work directly since rangeSearch is inclusive
+        } catch (error) {
+          // If rangeSearch fails, fall back to full scan
+          results = this.database.query(tableName, (record: any) =>
+            this.evaluateCondition(record, where)
+          );
+        }
+      } else {
+        //  FULL SCAN PATH: No suitable index or unsupported operator
+        results = this.database.query(tableName, (record: any) =>
+          this.evaluateCondition(record, where)
+        );
+      }
     } else {
+      // No WHERE clause: return all records
       results = this.database.query(tableName, () => true);
     }
 
@@ -460,6 +537,169 @@ export class QueryExecutor {
         return recordValue <= value;
       default:
         throw new Error(`Unsupported operator: ${operator}`);
+    }
+  }
+
+  /**
+   * Parse CREATE INDEX query
+   * Example: CREATE INDEX idx_name ON table_name(column_name)
+   * Example: CREATE UNIQUE INDEX idx_name ON table_name(column_name)
+   */
+  private parseCreateIndex(query: string): ParsedQuery {
+    const createIndexRegex =
+      /CREATE\s+(UNIQUE\s+)?INDEX\s+(\w+)\s+ON\s+(\w+)\s*\(\s*(\w+)\s*\)/i;
+    const match = query.match(createIndexRegex);
+
+    if (!match) {
+      throw new Error(
+        "Invalid CREATE INDEX syntax. Expected: CREATE [UNIQUE] INDEX index_name ON table_name(column_name)"
+      );
+    }
+
+    return {
+      type: "CREATE_INDEX",
+      indexName: match[2],
+      tableName: match[3],
+      columnName: match[4],
+      unique: !!match[1], // True if UNIQUE keyword is present
+    };
+  }
+
+  /**
+   * Parse DROP INDEX query
+   * Example: DROP INDEX idx_name ON table_name
+   */
+  private parseDropIndex(query: string): ParsedQuery {
+    const dropIndexRegex = /DROP\s+INDEX\s+(\w+)\s+ON\s+(\w+)/i;
+    const match = query.match(dropIndexRegex);
+
+    if (!match) {
+      throw new Error(
+        "Invalid DROP INDEX syntax. Expected: DROP INDEX index_name ON table_name"
+      );
+    }
+
+    return {
+      type: "DROP_INDEX",
+      indexName: match[1],
+      tableName: match[2],
+    };
+  }
+
+  /**
+   * Parse SHOW INDEXES query
+   * Example: SHOW INDEXES
+   * Example: SHOW INDEXES ON table_name
+   */
+  private parseShowIndexes(query: string): ParsedQuery {
+    const showIndexesRegex = /SHOW\s+INDEXES(?:\s+ON\s+(\w+))?/i;
+    const match = query.match(showIndexesRegex);
+
+    if (!match) {
+      throw new Error("Invalid SHOW INDEXES syntax");
+    }
+
+    return {
+      type: "SHOW_INDEXES",
+      tableName: match[1], // Optional - can be undefined
+    };
+  }
+
+  /**
+   * Execute CREATE INDEX
+   */
+  private executeCreateIndex(parsedQuery: ParsedQuery): any {
+    const { indexName, tableName, columnName, unique } = parsedQuery;
+
+    if (!indexName || !tableName || !columnName) {
+      throw new Error("Missing required fields for CREATE INDEX");
+    }
+
+    try {
+      this.database.createIndex(tableName, columnName, indexName, unique || false);
+      const uniqueText = unique ? "unique " : "";
+      return {
+        success: true,
+        message: `${uniqueText}Index '${indexName}' created on ${tableName}.${columnName}`,
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to create index: ${error.message}`);
+    }
+  }
+
+  /**
+   * Execute DROP INDEX
+   */
+  private executeDropIndex(parsedQuery: ParsedQuery): any {
+    const { indexName, tableName } = parsedQuery;
+
+    if (!indexName || !tableName) {
+      throw new Error("Missing required fields for DROP INDEX");
+    }
+
+    const table = this.database.getTable(tableName);
+    if (!table) {
+      throw new Error(`Table '${tableName}' does not exist`);
+    }
+
+    try {
+      // Drop from table (this calls index.dropIndex() and unregisters from table)
+      table.dropIndex(indexName);
+
+      // Also remove from database registry (skip dropIndex since table already did it)
+      this.database.dropIndex(indexName, true);
+
+      return {
+        success: true,
+        message: `Index '${indexName}' dropped from table '${tableName}'`,
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to drop index: ${error.message}`);
+    }
+  }
+
+  /**
+   * Execute SHOW INDEXES
+   */
+  private executeShowIndexes(parsedQuery: ParsedQuery): any {
+    const { tableName } = parsedQuery;
+
+    if (tableName) {
+      // Show indexes for a specific table
+      const table = this.database.getTable(tableName);
+      if (!table) {
+        throw new Error(`Table '${tableName}' does not exist`);
+      }
+
+      const indexes = table.getIndexes();
+      return indexes.map((index) => ({
+        table: tableName,
+        name: index.getIndexName(),
+        column: index.getColumnName(),
+        type: index.getIndexType(),
+        unique: index.isUnique(),
+      }));
+    } else {
+      // Show all indexes across all tables
+      const allIndexes: any[] = [];
+      const tablesObj = this.database.getTables();
+
+      // Convert object to array of tables
+      for (const tableName in tablesObj) {
+        const table = tablesObj[tableName];
+        const indexes = table.getIndexes();
+        for (const index of indexes) {
+          allIndexes.push({
+            table: table.name,
+            name: index.getIndexName(),
+            column: index.getColumnName(),
+            type: index.getIndexType(),
+            unique: index.isUnique(),
+          });
+        }
+      }
+
+      return allIndexes;
     }
   }
 }

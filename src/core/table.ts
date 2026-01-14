@@ -8,11 +8,14 @@
  */
 
 import { Column } from "./column";
+import { Index } from "./index";
 
 export class Table {
   private columns: Column[] = [];
   // Records are instances that follow the blueprint of the table's columns
   private records: any[] = [];
+  // Indexes registered on this table - automatically maintained on data changes
+  private indexes: Map<string, Index> = new Map();
 
   constructor(public name: string) {
     if (!name || name.trim().length === 0) {
@@ -53,6 +56,11 @@ export class Table {
     this.checkConstraints(record);
 
     this.records.push(record);
+
+    // Update all registered indexes with the new record
+    for (const index of this.indexes.values()) {
+      index.addRecord(record);
+    }
   }
 
   /**
@@ -70,10 +78,18 @@ export class Table {
       this.validateDataType(data[key], column.dataType, key);
     }
 
-    // Update all matching records
+    // Update all matching records and maintain indexes
     this.records = this.records.map((record) => {
       if (condition(record)) {
-        return { ...record, ...data };
+        const oldRecord = { ...record };
+        const updatedRecord = { ...record, ...data };
+
+        // Update all registered indexes
+        for (const index of this.indexes.values()) {
+          index.updateRecord(oldRecord, updatedRecord);
+        }
+
+        return updatedRecord;
       }
       return record;
     });
@@ -84,6 +100,14 @@ export class Table {
    * @param condition Function that returns true for records to delete
    */
   delete(condition: (record: any) => boolean): void {
+    // Update indexes before removing records
+    const recordsToDelete = this.records.filter(condition);
+    for (const record of recordsToDelete) {
+      for (const index of this.indexes.values()) {
+        index.removeRecord(record);
+      }
+    }
+
     this.records = this.records.filter((record) => !condition(record));
   }
 
@@ -198,5 +222,81 @@ export class Table {
    */
   query(condition: (record: any) => boolean): any[] {
     return this.records.filter(condition);
+  }
+
+  /**
+   * Registers an index on this table.
+   * The index will be automatically maintained when records are inserted, updated, or deleted.
+   * @param index The index to register
+   * @throws Error if an index with the same name already exists
+   */
+  registerIndex(index: Index): void {
+    const indexName = index.getIndexName();
+    if (this.indexes.has(indexName)) {
+      throw new Error(
+        `Index '${indexName}' is already registered on table '${this.name}'`
+      );
+    }
+    this.indexes.set(indexName, index);
+  }
+
+  /**
+   * Unregisters an index from this table.
+   * The index will no longer be maintained when records change.
+   * @param indexName The name of the index to unregister
+   * @returns true if the index was found and removed, false otherwise
+   */
+  unregisterIndex(indexName: string): boolean {
+    return this.indexes.delete(indexName);
+  }
+
+  /**
+   * Drops an index from this table
+   * This is a high-level API that:
+   * 1. Drops the index data
+   * 2. Unregisters it from the table
+   *
+   * @param indexName The name of the index to drop
+   * @throws Error if the index doesn't exist
+   */
+  dropIndex(indexName: string): void {
+    const index = this.indexes.get(indexName);
+    if (!index) {
+      throw new Error(
+        `Index '${indexName}' does not exist on table '${this.name}'`
+      );
+    }
+
+    // Drop the index data
+    index.dropIndex();
+
+    // Unregister from table
+    this.unregisterIndex(indexName);
+  }
+
+  /**
+   * Gets all indexes registered on this table.
+   * @returns Array of indexes
+   */
+  getIndexes(): Index[] {
+    return Array.from(this.indexes.values());
+  }
+
+  /**
+   * Gets an index by name.
+   * @param indexName The name of the index
+   * @returns The index if found, undefined otherwise
+   */
+  getIndex(indexName: string): Index | undefined {
+    return this.indexes.get(indexName);
+  }
+
+  /**
+   * Checks if an index with the given name is registered on this table.
+   * @param indexName The name of the index
+   * @returns true if the index exists, false otherwise
+   */
+  hasIndex(indexName: string): boolean {
+    return this.indexes.has(indexName);
   }
 }

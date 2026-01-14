@@ -407,6 +407,281 @@ describe("Complete RDBMS Integration Tests", () => {
       expect(stats.uniqueKeys).toBe(2); // 25 and 30
       expect(stats.totalRecords).toBe(3);
     });
+
+    test("should support index metadata (name, type, unique)", () => {
+      const table = new Table("users");
+      table.addColumn("id", "INT", true);
+      table.addColumn("email", "VARCHAR");
+
+      table.insert({ id: 1, email: "alice@example.com" });
+      table.insert({ id: 2, email: "bob@example.com" });
+
+      // Test auto-generated name
+      const autoIndex = new Index("users", "id");
+      expect(autoIndex.getIndexName()).toBe("idx_users_id");
+      expect(autoIndex.getIndexType()).toBe("HASH");
+      expect(autoIndex.isUnique()).toBe(false);
+
+      // Test custom name
+      const namedIndex = new Index("users", "email", "unique_email_idx", true);
+      expect(namedIndex.getIndexName()).toBe("unique_email_idx");
+      expect(namedIndex.isUnique()).toBe(true);
+    });
+
+    test("should enforce unique constraint on index creation", () => {
+      const table = new Table("users");
+      table.addColumn("id", "INT", true);
+      table.addColumn("email", "VARCHAR");
+
+      table.insert({ id: 1, email: "alice@example.com" });
+      table.insert({ id: 2, email: "alice@example.com" }); // duplicate
+
+      const uniqueIndex = new Index("users", "email", "unique_email_idx", true);
+
+      expect(() => {
+        uniqueIndex.createIndex(table.selectAll());
+      }).toThrow(
+        "Cannot create unique index 'unique_email_idx': duplicate value 'alice@example.com'"
+      );
+    });
+
+    test("should enforce unique constraint on record insert", () => {
+      const table = new Table("users");
+      table.addColumn("id", "INT", true);
+      table.addColumn("email", "VARCHAR");
+
+      table.insert({ id: 1, email: "alice@example.com" });
+
+      const uniqueIndex = new Index("users", "email", "unique_email_idx", true);
+      uniqueIndex.createIndex(table.selectAll());
+
+      expect(() => {
+        uniqueIndex.addRecord({ id: 2, email: "alice@example.com" });
+      }).toThrow(
+        "Unique index 'unique_email_idx' violation: value 'alice@example.com'"
+      );
+    });
+
+    test("should serialize index metadata for persistence", () => {
+      const index = new Index("users", "email", "unique_email_idx", true);
+      const serialized = index.serialize();
+
+      expect(serialized).toEqual({
+        name: "unique_email_idx",
+        columnName: "email",
+        type: "HASH",
+        unique: true,
+      });
+
+      // Test auto-generated name serialization
+      const autoIndex = new Index("products", "price");
+      expect(autoIndex.serialize()).toEqual({
+        name: "idx_products_price",
+        columnName: "price",
+        type: "HASH",
+        unique: false,
+      });
+    });
+  });
+
+  describe("Table Index Auto-Maintenance", () => {
+    /**
+     * TEST GROUP: TABLE INDEX AUTO-MAINTENANCE
+     *
+     * This group validates that indexes registered on tables are automatically
+     * maintained when records are inserted, updated, or deleted.
+     * Tests Table ↔ Index synchronization for data consistency.
+     *
+     * Validates:
+     * - Index registration on tables
+     * - Auto-update on insert operations
+     * - Auto-update on update operations
+     * - Auto-update on delete operations
+     * - Multiple indexes on same table
+     * - Index unregistration
+     *
+     * Components Tested:
+     * - Table class (index registration and maintenance)
+     * - Index class (data structure updates)
+     */
+
+    test("should register and unregister indexes on table", () => {
+      const table = new Table("users");
+      table.addColumn("id", "INT", true);
+      table.addColumn("age", "INT");
+
+      const ageIndex = new Index("users", "age");
+
+      // Register index
+      table.registerIndex(ageIndex);
+      expect(table.hasIndex("idx_users_age")).toBe(true);
+      expect(table.getIndex("idx_users_age")).toBe(ageIndex);
+      expect(table.getIndexes()).toHaveLength(1);
+
+      // Prevent duplicate registration
+      expect(() => {
+        table.registerIndex(ageIndex);
+      }).toThrow(
+        "Index 'idx_users_age' is already registered on table 'users'"
+      );
+
+      // Unregister index
+      const removed = table.unregisterIndex("idx_users_age");
+      expect(removed).toBe(true);
+      expect(table.hasIndex("idx_users_age")).toBe(false);
+      expect(table.getIndexes()).toHaveLength(0);
+
+      // Unregister non-existent index
+      const notRemoved = table.unregisterIndex("non_existent");
+      expect(notRemoved).toBe(false);
+    });
+
+    test("should auto-maintain index on insert operations", () => {
+      const table = new Table("users");
+      table.addColumn("id", "INT", true);
+      table.addColumn("age", "INT");
+      table.addColumn("name", "VARCHAR");
+
+      const ageIndex = new Index("users", "age");
+      ageIndex.createIndex([]); // Start with empty index
+      table.registerIndex(ageIndex);
+
+      // Insert records - index should be automatically updated
+      table.insert({ id: 1, age: 25, name: "Alice" });
+      table.insert({ id: 2, age: 30, name: "Bob" });
+      table.insert({ id: 3, age: 25, name: "Charlie" });
+
+      // Verify index was updated
+      const age25Results = ageIndex.search(25);
+      expect(age25Results).toHaveLength(2);
+      expect(age25Results.map((r: any) => r.name)).toEqual([
+        "Alice",
+        "Charlie",
+      ]);
+
+      const age30Results = ageIndex.search(30);
+      expect(age30Results).toHaveLength(1);
+      expect(age30Results[0].name).toBe("Bob");
+
+      const stats = ageIndex.getStats();
+      expect(stats.totalRecords).toBe(3);
+      expect(stats.uniqueKeys).toBe(2);
+    });
+
+    test("should auto-maintain index on update operations", () => {
+      const table = new Table("users");
+      table.addColumn("id", "INT", true);
+      table.addColumn("age", "INT");
+      table.addColumn("name", "VARCHAR");
+
+      table.insert({ id: 1, age: 25, name: "Alice" });
+      table.insert({ id: 2, age: 30, name: "Bob" });
+
+      const ageIndex = new Index("users", "age");
+      ageIndex.createIndex(table.selectAll());
+      table.registerIndex(ageIndex);
+
+      // Update age 25 → 35
+      table.update({ age: 35 }, (record: any) => record.age === 25);
+
+      // Old value should be gone
+      expect(ageIndex.search(25)).toHaveLength(0);
+
+      // New value should exist
+      const age35Results = ageIndex.search(35);
+      expect(age35Results).toHaveLength(1);
+      expect(age35Results[0].name).toBe("Alice");
+
+      // Unaffected value should still exist
+      expect(ageIndex.search(30)).toHaveLength(1);
+    });
+
+    test("should auto-maintain index on delete operations", () => {
+      const table = new Table("users");
+      table.addColumn("id", "INT", true);
+      table.addColumn("age", "INT");
+      table.addColumn("name", "VARCHAR");
+
+      table.insert({ id: 1, age: 25, name: "Alice" });
+      table.insert({ id: 2, age: 30, name: "Bob" });
+      table.insert({ id: 3, age: 25, name: "Charlie" });
+
+      const ageIndex = new Index("users", "age");
+      ageIndex.createIndex(table.selectAll());
+      table.registerIndex(ageIndex);
+
+      // Delete records with age 25
+      table.delete((record: any) => record.age === 25);
+
+      // Deleted value should be gone
+      expect(ageIndex.search(25)).toHaveLength(0);
+
+      // Unaffected value should still exist
+      const age30Results = ageIndex.search(30);
+      expect(age30Results).toHaveLength(1);
+      expect(age30Results[0].name).toBe("Bob");
+
+      const stats = ageIndex.getStats();
+      expect(stats.totalRecords).toBe(1);
+      expect(stats.uniqueKeys).toBe(1);
+    });
+
+    test("should maintain multiple indexes on same table", () => {
+      const table = new Table("users");
+      table.addColumn("id", "INT", true);
+      table.addColumn("age", "INT");
+      table.addColumn("city", "VARCHAR");
+
+      const ageIndex = new Index("users", "age");
+      const cityIndex = new Index("users", "city");
+
+      ageIndex.createIndex([]);
+      cityIndex.createIndex([]);
+
+      table.registerIndex(ageIndex);
+      table.registerIndex(cityIndex);
+
+      // Insert records
+      table.insert({ id: 1, age: 25, city: "NYC" });
+      table.insert({ id: 2, age: 30, city: "LA" });
+      table.insert({ id: 3, age: 25, city: "NYC" });
+
+      // Both indexes should be maintained
+      expect(ageIndex.search(25)).toHaveLength(2);
+      expect(cityIndex.search("NYC")).toHaveLength(2);
+
+      // Update record
+      table.update({ city: "SF" }, (r: any) => r.id === 1);
+
+      // Both indexes should reflect the update
+      expect(ageIndex.search(25)).toHaveLength(2); // age unchanged
+      expect(cityIndex.search("NYC")).toHaveLength(1); // one NYC removed
+      expect(cityIndex.search("SF")).toHaveLength(1); // SF added
+
+      // Delete record
+      table.delete((r: any) => r.id === 2);
+
+      // Both indexes should reflect the deletion
+      expect(ageIndex.search(30)).toHaveLength(0);
+      expect(cityIndex.search("LA")).toHaveLength(0);
+      expect(table.getIndexes()).toHaveLength(2);
+    });
+
+    test("should handle index maintenance when no indexes registered", () => {
+      const table = new Table("users");
+      table.addColumn("id", "INT", true);
+      table.addColumn("age", "INT");
+
+      // No indexes registered - operations should work normally
+      expect(() => {
+        table.insert({ id: 1, age: 25 });
+        table.update({ age: 30 }, (r: any) => r.id === 1);
+        table.delete((r: any) => r.id === 1);
+      }).not.toThrow();
+
+      expect(table.selectAll()).toHaveLength(0);
+      expect(table.getIndexes()).toHaveLength(0);
+    });
   });
 
   describe("Storage Engine - Persistence", () => {
@@ -550,6 +825,139 @@ describe("Complete RDBMS Integration Tests", () => {
 
       const size = storage.getDatabaseSize();
       expect(size).toBeGreaterThan(0);
+    });
+
+    test("should persist and restore index definitions", () => {
+      // Create table with data
+      db.createTable("users", [
+        new Column("id", "INT", true),
+        new Column("age", "INT"),
+        new Column("email", "VARCHAR"),
+      ]);
+
+      db.insert("users", { id: 1, age: 25, email: "alice@example.com" });
+      db.insert("users", { id: 2, age: 30, email: "bob@example.com" });
+      db.insert("users", { id: 3, age: 25, email: "charlie@example.com" });
+
+      // Create and register indexes
+      const table = db.getTable("users")!;
+      const ageIndex = new Index("users", "age");
+      ageIndex.createIndex(table.selectAll());
+      db.addIndex("idx_users_age", ageIndex);
+      table.registerIndex(ageIndex);
+
+      const emailIndex = new Index("users", "email", "unique_email_idx", true);
+      emailIndex.createIndex(table.selectAll());
+      db.addIndex("unique_email_idx", emailIndex);
+      table.registerIndex(emailIndex);
+
+      // Save database
+      storage.saveDatabase(db);
+
+      // Load into new database instance
+      const db2 = new Database();
+      storage.loadDatabase(db2);
+      db2.connect();
+
+      // Verify indexes were restored
+      expect(db2.hasIndex("idx_users_age")).toBe(true);
+      expect(db2.hasIndex("unique_email_idx")).toBe(true);
+
+      // Verify index functionality
+      const restoredAgeIndex = db2.getIndex("idx_users_age")!;
+      expect(restoredAgeIndex).toBeDefined();
+      expect(restoredAgeIndex.getIndexName()).toBe("idx_users_age");
+      expect(restoredAgeIndex.getIndexType()).toBe("HASH");
+      expect(restoredAgeIndex.isUnique()).toBe(false);
+
+      const restoredEmailIndex = db2.getIndex("unique_email_idx")!;
+      expect(restoredEmailIndex).toBeDefined();
+      expect(restoredEmailIndex.isUnique()).toBe(true);
+
+      // Verify index data was rebuilt correctly
+      const age25Results = restoredAgeIndex.search(25);
+      expect(age25Results).toHaveLength(2);
+      expect(age25Results.map((r: any) => r.email)).toEqual([
+        "alice@example.com",
+        "charlie@example.com",
+      ]);
+
+      const aliceResults = restoredEmailIndex.search("alice@example.com");
+      expect(aliceResults).toHaveLength(1);
+      expect(aliceResults[0].id).toBe(1);
+
+      // Verify table has indexes registered
+      const restoredTable = db2.getTable("users")!;
+      expect(restoredTable.hasIndex("idx_users_age")).toBe(true);
+      expect(restoredTable.hasIndex("unique_email_idx")).toBe(true);
+      expect(restoredTable.getIndexes()).toHaveLength(2);
+    });
+
+    test("should maintain index auto-updates after reload", () => {
+      // Create table with index
+      db.createTable("products", [
+        new Column("id", "INT", true),
+        new Column("price", "INT"),
+      ]);
+
+      db.insert("products", { id: 1, price: 100 });
+      db.insert("products", { id: 2, price: 200 });
+
+      const table = db.getTable("products")!;
+      const priceIndex = new Index("products", "price");
+      priceIndex.createIndex(table.selectAll());
+      db.addIndex("idx_products_price", priceIndex);
+      table.registerIndex(priceIndex);
+
+      // Save and reload
+      storage.saveDatabase(db);
+      const db2 = new Database();
+      storage.loadDatabase(db2);
+      db2.connect();
+
+      // Insert new record - should auto-update index
+      db2.insert("products", { id: 3, price: 100 });
+
+      // Verify index was auto-updated
+      const reloadedIndex = db2.getIndex("idx_products_price")!;
+      const price100Results = reloadedIndex.search(100);
+      expect(price100Results).toHaveLength(2);
+      expect(price100Results.map((r: any) => r.id)).toEqual([1, 3]);
+
+      // Update record - should auto-update index
+      const reloadedTable = db2.getTable("products")!;
+      reloadedTable.update({ price: 300 }, (r: any) => r.id === 2);
+
+      expect(reloadedIndex.search(200)).toHaveLength(0);
+      expect(reloadedIndex.search(300)).toHaveLength(1);
+
+      // Delete record - should auto-update index
+      reloadedTable.delete((r: any) => r.id === 1);
+      expect(reloadedIndex.search(100)).toHaveLength(1); // Only id:3 remains
+    });
+
+    test("should handle tables without indexes during save/load", () => {
+      // Create table without indexes
+      db.createTable("simple", [
+        new Column("id", "INT", true),
+        new Column("value", "VARCHAR"),
+      ]);
+
+      db.insert("simple", { id: 1, value: "test" });
+      storage.saveDatabase(db);
+
+      // Load into new database
+      const db2 = new Database();
+      storage.loadDatabase(db2);
+      db2.connect();
+
+      // Verify table loaded correctly without indexes
+      const records = db2.query("simple", () => true);
+      expect(records).toHaveLength(1);
+      expect(records[0]).toEqual({ id: 1, value: "test" });
+
+      // Verify no indexes registered
+      expect(db2.getIndexes("simple")).toHaveLength(0);
     });
   });
 

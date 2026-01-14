@@ -47,6 +47,11 @@ export class REPL {
     console.log("  DELETE FROM users WHERE age < 18");
     console.log("  CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR)");
     console.log("  DROP TABLE users");
+    console.log("\n Index Management:");
+    console.log("  CREATE INDEX idx_age ON users(age) - Create an index");
+    console.log("  DROP INDEX idx_age ON users - Remove an index");
+    console.log("  SHOW INDEXES - List all indexes");
+    console.log("  SHOW INDEXES ON users - List indexes for a table");
     console.log("\n⚡ Quick Commands:");
     console.log("  TABLES - List all tables in current database");
     console.log("  SAVE - Save database to disk");
@@ -347,23 +352,28 @@ export class REPL {
           const result = this.queryExecutor.execute(input);
 
           if (Array.isArray(result)) {
-            // SELECT query result
+            // SELECT query or SHOW INDEXES result
             console.log(`Found ${result.length} record(s):`);
             if (result.length > 0) {
               console.table(result);
             }
+          } else if (result && typeof result === 'object' && result.success) {
+            // CREATE INDEX or DROP INDEX result
+            console.log(`✓ ${result.message}`);
           } else {
             // Other query result (string message)
             console.log(result);
           }
 
-          // Auto-save after data modifications
+          // Auto-save after data modifications and index operations
           if (
             command.startsWith("INSERT") ||
             command.startsWith("UPDATE") ||
             command.startsWith("DELETE") ||
-            command.startsWith("CREATE") ||
-            command.startsWith("DROP")
+            command.startsWith("CREATE TABLE") ||
+            command.startsWith("DROP TABLE") ||
+            command.startsWith("CREATE INDEX") ||
+            command.startsWith("DROP INDEX")
           ) {
             this.storage.saveDatabase(this.db);
             console.log(" Changes saved to disk");
@@ -397,6 +407,9 @@ export class REPL {
       "DELETE",
       "CREATE TABLE",
       "DROP TABLE",
+      "CREATE INDEX",
+      "DROP INDEX",
+      "SHOW INDEXES",
       "FROM",
       "WHERE",
     ];

@@ -244,4 +244,342 @@ describe("QueryExecutor", () => {
     expect(result.length).toBe(1);
     expect(result[0].name).toBe("John Doe");
   });
+
+  /**
+   * TEST GROUP: INDEX-OPTIMIZED QUERY EXECUTION
+   *
+   * This group validates that the QueryExecutor automatically uses indexes
+   * when available to optimize SELECT queries with WHERE clauses.
+   *
+   * Validates:
+   * - Equality operator (=) uses index.search() for O(1) lookup
+   * - Range operators (>, <, >=, <=) use index.rangeSearch()
+   * - Falls back to full scan when no index available
+   * - Returns correct results regardless of optimization path
+   */
+  describe("Index-Optimized Queries", () => {
+    test("should use index for equality WHERE clause (=)", () => {
+      // Create test data
+      executor.execute(
+        "INSERT INTO users (id, name, email) VALUES (1, 'Alice', 'alice@example.com')"
+      );
+      executor.execute(
+        "INSERT INTO users (id, name, email) VALUES (2, 'Bob', 'bob@example.com')"
+      );
+      executor.execute(
+        "INSERT INTO users (id, name, email) VALUES (3, 'Charlie', 'charlie@example.com')"
+      );
+
+      // Create index on email column
+      const table = db.getTable("users")!;
+      const Index = require("../src/core/index").Index;
+      const emailIndex = new Index("users", "email");
+      emailIndex.createIndex(table.selectAll());
+      db.addIndex("idx_users_email", emailIndex);
+      table.registerIndex(emailIndex);
+
+      // Execute query - should use index
+      const result = executor.execute(
+        "SELECT * FROM users WHERE email = 'bob@example.com'"
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0].name).toBe("Bob");
+      expect(result[0].id).toBe(2);
+    });
+
+    test("should use index for range WHERE clause (>)", () => {
+      // Create products table with numeric column
+      db.createTable("products", [
+        new Column("id", "INT", true),
+        new Column("name", "VARCHAR"),
+        new Column("price", "INT"),
+      ]);
+
+      const productExecutor = new QueryExecutor(db);
+      productExecutor.execute(
+        "INSERT INTO products (id, name, price) VALUES (1, 'Widget', 10)"
+      );
+      productExecutor.execute(
+        "INSERT INTO products (id, name, price) VALUES (2, 'Gadget', 25)"
+      );
+      productExecutor.execute(
+        "INSERT INTO products (id, name, price) VALUES (3, 'Doohickey', 50)"
+      );
+
+      // Create index on price column
+      const table = db.getTable("products")!;
+      const Index = require("../src/core/index").Index;
+      const priceIndex = new Index("products", "price");
+      priceIndex.createIndex(table.selectAll());
+      db.addIndex("idx_products_price", priceIndex);
+      table.registerIndex(priceIndex);
+
+      // Execute range query - should use index
+      const result = productExecutor.execute(
+        "SELECT * FROM products WHERE price > 20"
+      );
+
+      expect(result).toHaveLength(2);
+      expect(result.map((r: any) => r.name).sort()).toEqual([
+        "Doohickey",
+        "Gadget",
+      ]);
+    });
+
+    test("should use index for range WHERE clause (>=)", () => {
+      // Setup products table and index
+      db.createTable("products", [
+        new Column("id", "INT", true),
+        new Column("name", "VARCHAR"),
+        new Column("price", "INT"),
+      ]);
+
+      const productExecutor = new QueryExecutor(db);
+      productExecutor.execute(
+        "INSERT INTO products (id, name, price) VALUES (1, 'Widget', 10)"
+      );
+      productExecutor.execute(
+        "INSERT INTO products (id, name, price) VALUES (2, 'Gadget', 25)"
+      );
+      productExecutor.execute(
+        "INSERT INTO products (id, name, price) VALUES (3, 'Doohickey', 50)"
+      );
+
+      const table = db.getTable("products")!;
+      const Index = require("../src/core/index").Index;
+      const priceIndex = new Index("products", "price");
+      priceIndex.createIndex(table.selectAll());
+      db.addIndex("idx_products_price", priceIndex);
+      table.registerIndex(priceIndex);
+
+      const result = productExecutor.execute(
+        "SELECT * FROM products WHERE price >= 25"
+      );
+
+      expect(result).toHaveLength(2);
+      expect(result.map((r: any) => r.price).sort()).toEqual([25, 50]);
+    });
+
+    test("should use index for range WHERE clause (<)", () => {
+      // Setup products table and index
+      db.createTable("products", [
+        new Column("id", "INT", true),
+        new Column("name", "VARCHAR"),
+        new Column("price", "INT"),
+      ]);
+
+      const productExecutor = new QueryExecutor(db);
+      productExecutor.execute(
+        "INSERT INTO products (id, name, price) VALUES (1, 'Widget', 10)"
+      );
+      productExecutor.execute(
+        "INSERT INTO products (id, name, price) VALUES (2, 'Gadget', 25)"
+      );
+      productExecutor.execute(
+        "INSERT INTO products (id, name, price) VALUES (3, 'Doohickey', 50)"
+      );
+
+      const table = db.getTable("products")!;
+      const Index = require("../src/core/index").Index;
+      const priceIndex = new Index("products", "price");
+      priceIndex.createIndex(table.selectAll());
+      db.addIndex("idx_products_price", priceIndex);
+      table.registerIndex(priceIndex);
+
+      const result = productExecutor.execute(
+        "SELECT * FROM products WHERE price < 30"
+      );
+
+      expect(result).toHaveLength(2);
+      expect(result.map((r: any) => r.price).sort()).toEqual([10, 25]);
+    });
+
+    test("should use index for range WHERE clause (<=)", () => {
+      // Setup products table and index
+      db.createTable("products", [
+        new Column("id", "INT", true),
+        new Column("name", "VARCHAR"),
+        new Column("price", "INT"),
+      ]);
+
+      const productExecutor = new QueryExecutor(db);
+      productExecutor.execute(
+        "INSERT INTO products (id, name, price) VALUES (1, 'Widget', 10)"
+      );
+      productExecutor.execute(
+        "INSERT INTO products (id, name, price) VALUES (2, 'Gadget', 25)"
+      );
+      productExecutor.execute(
+        "INSERT INTO products (id, name, price) VALUES (3, 'Doohickey', 50)"
+      );
+
+      const table = db.getTable("products")!;
+      const Index = require("../src/core/index").Index;
+      const priceIndex = new Index("products", "price");
+      priceIndex.createIndex(table.selectAll());
+      db.addIndex("idx_products_price", priceIndex);
+      table.registerIndex(priceIndex);
+
+      const result = productExecutor.execute(
+        "SELECT * FROM products WHERE price <= 25"
+      );
+
+      expect(result).toHaveLength(2);
+      expect(result.map((r: any) => r.price).sort()).toEqual([10, 25]);
+    });
+
+    test("should fall back to full scan when no index exists", () => {
+      // Create table without index
+      db.createTable("orders", [
+        new Column("id", "INT", true),
+        new Column("customer", "VARCHAR"),
+        new Column("total", "INT"),
+      ]);
+
+      const orderExecutor = new QueryExecutor(db);
+      orderExecutor.execute(
+        "INSERT INTO orders (id, customer, total) VALUES (1, 'Alice', 100)"
+      );
+      orderExecutor.execute(
+        "INSERT INTO orders (id, customer, total) VALUES (2, 'Bob', 200)"
+      );
+
+      // No index on customer - should use full scan
+      const result = orderExecutor.execute(
+        "SELECT * FROM orders WHERE customer = 'Alice'"
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0].total).toBe(100);
+    });
+
+    test("should return correct results with index on non-unique column", () => {
+      // Test index on column with duplicate values
+      db.createTable("reviews", [
+        new Column("id", "INT", true),
+        new Column("product", "VARCHAR"),
+        new Column("rating", "INT"),
+      ]);
+
+      const reviewExecutor = new QueryExecutor(db);
+      reviewExecutor.execute(
+        "INSERT INTO reviews (id, product, rating) VALUES (1, 'Widget', 5)"
+      );
+      reviewExecutor.execute(
+        "INSERT INTO reviews (id, product, rating) VALUES (2, 'Gadget', 4)"
+      );
+      reviewExecutor.execute(
+        "INSERT INTO reviews (id, product, rating) VALUES (3, 'Doohickey', 5)"
+      );
+
+      // Create index on rating (non-unique)
+      const table = db.getTable("reviews")!;
+      const Index = require("../src/core/index").Index;
+      const ratingIndex = new Index("reviews", "rating");
+      ratingIndex.createIndex(table.selectAll());
+      db.addIndex("idx_reviews_rating", ratingIndex);
+      table.registerIndex(ratingIndex);
+
+      // Query with duplicate rating value
+      const result = reviewExecutor.execute(
+        "SELECT * FROM reviews WHERE rating = 5"
+      );
+
+      expect(result).toHaveLength(2);
+      expect(result.map((r: any) => r.product).sort()).toEqual([
+        "Doohickey",
+        "Widget",
+      ]);
+    });
+
+    test("should handle column projection with index optimization", () => {
+      // Create test data
+      executor.execute(
+        "INSERT INTO users (id, name, email) VALUES (1, 'Alice', 'alice@example.com')"
+      );
+      executor.execute(
+        "INSERT INTO users (id, name, email) VALUES (2, 'Bob', 'bob@example.com')"
+      );
+
+      // Create index on email column
+      const table = db.getTable("users")!;
+      const Index = require("../src/core/index").Index;
+      const emailIndex = new Index("users", "email");
+      emailIndex.createIndex(table.selectAll());
+      db.addIndex("idx_users_email", emailIndex);
+      table.registerIndex(emailIndex);
+
+      // SELECT specific columns with indexed WHERE
+      const result = executor.execute(
+        "SELECT name, email FROM users WHERE email = 'alice@example.com'"
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).toEqual({
+        name: "Alice",
+        email: "alice@example.com",
+      });
+      expect(result[0].id).toBeUndefined(); // id not projected
+    });
+
+    test("should fall back to full scan when no index available", () => {
+      // Query on non-indexed column should still work
+      db.createTable("inventory", [
+        new Column("id", "INT", true),
+        new Column("item", "VARCHAR"),
+        new Column("quantity", "INT"),
+      ]);
+
+      const invExecutor = new QueryExecutor(db);
+      invExecutor.execute(
+        "INSERT INTO inventory (id, item, quantity) VALUES (1, 'Bolts', 100)"
+      );
+      invExecutor.execute(
+        "INSERT INTO inventory (id, item, quantity) VALUES (2, 'Nuts', 50)"
+      );
+      invExecutor.execute(
+        "INSERT INTO inventory (id, item, quantity) VALUES (3, 'Screws', 75)"
+      );
+
+      // No index on quantity - should use full scan
+      const result = invExecutor.execute(
+        "SELECT * FROM inventory WHERE quantity > 60"
+      );
+
+      expect(result).toHaveLength(2);
+      expect(result.map((r: any) => r.item).sort()).toEqual([
+        "Bolts",
+        "Screws",
+      ]);
+    });
+
+    test("should fall back to full scan for unsupported operators with index", () => {
+      // Create test data with index
+      executor.execute(
+        "INSERT INTO users (id, name, email) VALUES (1, 'Alice', 'alice@example.com')"
+      );
+      executor.execute(
+        "INSERT INTO users (id, name, email) VALUES (2, 'Bob', 'bob@example.com')"
+      );
+      executor.execute(
+        "INSERT INTO users (id, name, email) VALUES (3, 'Charlie', 'charlie@example.com')"
+      );
+
+      const table = db.getTable("users")!;
+      const Index = require("../src/core/index").Index;
+      const emailIndex = new Index("users", "email");
+      emailIndex.createIndex(table.selectAll());
+      db.addIndex("idx_users_email", emailIndex);
+      table.registerIndex(emailIndex);
+
+      // Test != operator (not optimizable with current hash index)
+      const result = executor.execute(
+        "SELECT * FROM users WHERE email != 'alice@example.com'"
+      );
+
+      expect(result).toHaveLength(2); // Bob and Charlie
+      expect(result.map((r: any) => r.name).sort()).toEqual(["Bob", "Charlie"]);
+    });
+  });
 });

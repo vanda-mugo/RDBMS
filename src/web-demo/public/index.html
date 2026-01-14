@@ -31,6 +31,7 @@
         <div class="tabs">
             <button class="tab-button active" onclick="showTab('records')">Records</button>
             <button class="tab-button" onclick="showTab('tables')">Tables</button>
+            <button class="tab-button" onclick="showTab('indexes')">Indexes</button>
             <button class="tab-button" onclick="showTab('stats')">Statistics</button>
             <button class="tab-button" onclick="showTab('databases')">Databases</button>
         </div>
@@ -111,6 +112,80 @@
 
             <div class="section">
                 <button onclick="syncDatabase()" class="btn-secondary" id="sync-btn-tables">Sync Database</button>
+            </div>
+        </div>
+
+        <!-- Indexes Tab -->
+        <div id="indexes-tab" class="tab-content">
+            <div class="section">
+                <h2>Create New Index</h2>
+                <form id="create-index-form" onsubmit="createIndex(event)">
+                    <div class="form-group">
+                        <label for="index-table-select">Table:</label>
+                        <select id="index-table-select" required onchange="loadTableColumns()">
+                            <option value="">Select a table...</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="index-column-select">Column:</label>
+                        <select id="index-column-select" required>
+                            <option value="">Select a column...</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="index-name">Index Name:</label>
+                        <input type="text" id="index-name" required placeholder="e.g., idx_users_age">
+                        <small>Convention: idx_tablename_columnname</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="index-unique">
+                            Unique Index (enforce uniqueness constraint)
+                        </label>
+                    </div>
+                    
+                    <button type="submit" class="btn-primary">Create Index</button>
+                </form>
+            </div>
+
+            <div class="section">
+                <h2>Existing Indexes</h2>
+                <div class="controls">
+                    <button onclick="loadIndexes()" class="btn-secondary">Refresh</button>
+                    <label>
+                        Filter by table:
+                        <select id="index-filter-table" onchange="loadIndexes()">
+                            <option value="">All tables</option>
+                        </select>
+                    </label>
+                </div>
+                <div class="table-container">
+                    <table id="indexes-table">
+                        <thead>
+                            <tr>
+                                <th>Table</th>
+                                <th>Index Name</th>
+                                <th>Column</th>
+                                <th>Type</th>
+                                <th>Unique</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="indexes-tbody">
+                            <tr><td colspan="6">Loading indexes...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>SQL Console</h2>
+                <textarea id="sql-query" rows="4" placeholder="Enter SQL command (e.g., CREATE INDEX idx_price ON products(price))"></textarea>
+                <button onclick="executeSQLQuery()" class="btn-primary">Execute SQL</button>
+                <div id="sql-result" class="sql-result"></div>
             </div>
         </div>
 
