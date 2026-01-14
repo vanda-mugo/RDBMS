@@ -49,6 +49,10 @@ async function refreshTables() {
         if (tables.length > 0) {
             currentTable = tables[0].name;
             loadRecords();
+        } else {
+            // Clear records display when no tables exist
+            currentTable = null;
+            clearRecordsDisplay();
         }
     } catch (error) {
         showMessage('Error loading tables: ' + error.message, 'error');
@@ -202,7 +206,8 @@ async function loadRecords() {
     try {
         // Get table schema
         const tablesResponse = await fetch('/api/tables');
-        const allTables = await tablesResponse.json();
+        const tablesData = await tablesResponse.json();
+        const allTables = tablesData.tables || tablesData; // Support both old and new format
         const tableInfo = allTables.find(t => t.name === currentTable);
         
         if (!tableInfo) {
@@ -298,6 +303,17 @@ function formatValue(value, dataType) {
     if (dataType === 'BOOLEAN') return value ? 'Yes' : 'No';
     if (dataType === 'DATE') return new Date(value).toLocaleDateString();
     return value;
+}
+
+// Clear records display when no tables exist
+function clearRecordsDisplay() {
+    const thead = document.getElementById('records-thead');
+    const tbody = document.getElementById('records-tbody');
+    const addRecordForm = document.getElementById('add-record-form');
+    
+    thead.innerHTML = '<tr><th>No Tables Available</th></tr>';
+    tbody.innerHTML = '<tr><td>Create a table first to start adding records</td></tr>';
+    addRecordForm.innerHTML = '<p>No table selected. Create or select a table to add records.</p>';
 }
 
 async function addRecord(event) {
@@ -647,3 +663,341 @@ function showMessage(text, type = 'info') {
         messageEl.classList.remove('show');
     }, 3000);
 }
+// ==================== DATABASE MANAGEMENT ====================
+
+let currentDatabase = 'default';
+
+// Load all databases and populate selector
+async function loadDatabaseSelector() {
+    try {
+        const response = await fetch('/api/databases');
+        const data = await response.json();
+        
+        const select = document.getElementById('database-select');
+        select.innerHTML = data.databases.map(db => 
+            `<option value="${db.name}" ${db.current ? 'selected' : ''}>${db.name}${db.current ? ' (current)' : ''}</option>`
+        ).join('');
+        
+        currentDatabase = data.currentDatabase;
+    } catch (error) {
+        console.error('Error loading databases:', error);
+        showMessage('Error loading databases: ' + error.message, 'error');
+    }
+}
+
+// Switch to a different database
+async function switchDatabase() {
+    const select = document.getElementById('database-select');
+    const newDatabase = select.value;
+    
+    if (!newDatabase || newDatabase === currentDatabase) {
+        return;
+    }
+    
+    try {
+        showMessage(`Switching to database '${newDatabase}'...`, 'info');
+        
+        const response = await fetch(`/api/databases/${newDatabase}/use`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to switch database');
+        }
+        
+        const result = await response.json();
+        currentDatabase = newDatabase;
+        
+        showMessage(`✓ ${result.message} (${result.tablesLoaded} tables loaded)`, 'success');
+        
+        // Clear current table reference before refreshing
+        currentTable = null;
+        
+        // Refresh all views
+        await refreshTables();
+        await loadStats();
+        await loadDatabases();
+        
+    } catch (error) {
+        console.error('Error switching database:', error);
+        showMessage('Error switching database: ' + error.message, 'error');
+        // Revert selector
+        await loadDatabaseSelector();
+    }
+}
+
+// Show create database modal
+function showCreateDatabaseModal() {
+    document.getElementById('create-database-modal').style.display = 'block';
+    document.getElementById('new-database-name').value = '';
+    document.getElementById('new-database-name').focus();
+}
+
+// Close create database modal
+function closeCreateDatabaseModal() {
+    document.getElementById('create-database-modal').style.display = 'none';
+}
+
+// Create a new database
+async function createDatabase(event) {
+    event.preventDefault();
+    
+    const nameInput = document.getElementById('new-database-name');
+    const dbName = nameInput.value.trim();
+    
+    if (!dbName) {
+        showMessage('Database name is required', 'error');
+        return;
+    }
+    
+    try {
+        showMessage(`Creating database '${dbName}'...`, 'info');
+        
+        const response = await fetch('/api/databases', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ name: dbName })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to create database');
+        }
+        
+        const result = await response.json();
+        showMessage(`✓ ${result.message}`, 'success');
+        
+        closeCreateDatabaseModal();
+        await loadDatabaseSelector();
+        await loadDatabases();
+        
+    } catch (error) {
+        console.error('Error creating database:', error);
+        showMessage('Error: ' + error.message, 'error');
+    }
+}
+
+// Show database management panel
+async function showDatabaseManagementPanel() {
+    document.getElementById('database-management-modal').style.display = 'block';
+    await loadDatabaseManagementContent();
+}
+
+// Close database management panel
+function closeDatabaseManagementPanel() {
+    document.getElementById('database-management-modal').style.display = 'none';
+}
+
+// Load database management content
+async function loadDatabaseManagementContent() {
+    const container = document.getElementById('database-management-content');
+    container.innerHTML = '<p>Loading databases...</p>';
+    
+    try {
+        const response = await fetch('/api/databases');
+        const data = await response.json();
+        
+        if (data.databases.length === 0) {
+            container.innerHTML = '<p>No databases found.</p>';
+            return;
+        }
+        
+        container.innerHTML = data.databases.map(db => `
+            <div class="database-card ${db.current ? 'current' : ''}">
+                <div class="database-card-header">
+                    <h3>${db.name}</h3>
+                    <span class="database-badge ${db.current ? 'badge-current' : 'badge-inactive'}">
+                        ${db.current ? 'CURRENT' : 'INACTIVE'}
+                    </span>
+                </div>
+                <div class="database-info">
+                    ${db.current ? 'This is your active database' : 'Click "Use" to switch to this database'}
+                </div>
+                <div class="database-actions">
+                    ${!db.current ? `<button onclick="useDatabaseFromPanel('${db.name}')" class="btn-primary">Use Database</button>` : ''}
+                    ${!db.current ? `<button onclick="dropDatabaseFromPanel('${db.name}')" class="btn-danger">Delete</button>` : '<button disabled class="btn-secondary">Cannot Delete Current DB</button>'}
+                </div>
+            </div>
+        `).join('');
+        
+    } catch (error) {
+        console.error('Error loading databases:', error);
+        container.innerHTML = `<p class="error">Error loading databases: ${error.message}</p>`;
+    }
+}
+
+// Use database from panel
+async function useDatabaseFromPanel(dbName) {
+    try {
+        showMessage(`Switching to database '${dbName}'...`, 'info');
+        
+        const response = await fetch(`/api/databases/${dbName}/use`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to switch database');
+        }
+        
+        const result = await response.json();
+        currentDatabase = dbName;
+        
+        showMessage(`✓ ${result.message}`, 'success');
+        
+        // Clear current table reference before refreshing
+        currentTable = null;
+        
+        await loadDatabaseSelector();
+        await loadDatabaseManagementContent();
+        await refreshTables();
+        await loadStats();
+        await loadDatabases();
+        
+    } catch (error) {
+        console.error('Error switching database:', error);
+        showMessage('Error: ' + error.message, 'error');
+    }
+}
+
+// Drop database from panel
+async function dropDatabaseFromPanel(dbName) {
+    if (!confirm(`Are you sure you want to delete the database '${dbName}'? This action cannot be undone!`)) {
+        return;
+    }
+    
+    try {
+        showMessage(`Deleting database '${dbName}'...`, 'info');
+        
+        const response = await fetch(`/api/databases/${dbName}`, {
+            method: 'DELETE'
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to delete database');
+        }
+        
+        const result = await response.json();
+        showMessage(`✓ ${result.message}`, 'success');
+        
+        await loadDatabaseSelector();
+        await loadDatabaseManagementContent();
+        await loadDatabases();
+        
+    } catch (error) {
+        console.error('Error deleting database:', error);
+        showMessage('Error: ' + error.message, 'error');
+    }
+}
+
+// Load databases list for Databases tab
+async function loadDatabases() {
+    const container = document.getElementById('databases-list');
+    container.innerHTML = '<p>Loading databases...</p>';
+    
+    try {
+        const response = await fetch('/api/databases');
+        const data = await response.json();
+        
+        if (data.databases.length === 0) {
+            container.innerHTML = '<p>No databases found. Create one to get started!</p>';
+            return;
+        }
+        
+        container.innerHTML = data.databases.map(db => `
+            <div class="database-card ${db.current ? 'current' : ''}">
+                <div class="database-card-header">
+                    <h3>${db.name}</h3>
+                    <span class="database-badge ${db.current ? 'badge-current' : 'badge-inactive'}">
+                        ${db.current ? 'CURRENT' : 'INACTIVE'}
+                    </span>
+                </div>
+                <div class="database-info">
+                    ${db.current ? '✓ This is your active database' : 'Switch to this database to view and edit its data'}
+                </div>
+                <div class="database-actions">
+                    ${!db.current ? `<button onclick="switchToDatabase('${db.name}')" class="btn-primary">Switch to This Database</button>` : ''}
+                    ${!db.current ? `<button onclick="deleteDatabase('${db.name}')" class="btn-danger">Delete Database</button>` : '<button disabled class="btn-secondary">Cannot Delete Current Database</button>'}
+                </div>
+            </div>
+        `).join('');
+        
+    } catch (error) {
+        console.error('Error loading databases:', error);
+        container.innerHTML = `<p class="error">Error loading databases: ${error.message}</p>`;
+    }
+}
+
+// Switch to database from Databases tab
+async function switchToDatabase(dbName) {
+    const select = document.getElementById('database-select');
+    select.value = dbName;
+    await switchDatabase();
+}
+
+// Delete database from Databases tab
+async function deleteDatabase(dbName) {
+    if (!confirm(`Are you sure you want to permanently delete the database '${dbName}'?\n\nThis will delete all tables and data in this database. This action cannot be undone!`)) {
+        return;
+    }
+    
+    try {
+        showMessage(`Deleting database '${dbName}'...`, 'info');
+        
+        const response = await fetch(`/api/databases/${dbName}`, {
+            method: 'DELETE'
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to delete database');
+        }
+        
+        const result = await response.json();
+        showMessage(`✓ ${result.message}`, 'success');
+        
+        await loadDatabases();
+        await loadDatabaseSelector();
+        
+    } catch (error) {
+        console.error('Error deleting database:', error);
+        showMessage('Error: ' + error.message, 'error');
+    }
+}
+
+// Initialize database selector on page load
+window.addEventListener('DOMContentLoaded', () => {
+    loadDatabaseSelector();
+});
+
+// Update showTab function to handle databases tab
+const originalShowTab = showTab;
+window.showTab = function(tabName) {
+    originalShowTab(tabName);
+    if (tabName === 'databases') {
+        loadDatabases();
+    }
+};
+
+// Close modals when clicking outside
+window.onclick = function(event) {
+    const createModal = document.getElementById('create-database-modal');
+    const managementModal = document.getElementById('database-management-modal');
+    
+    if (event.target === createModal) {
+        closeCreateDatabaseModal();
+    }
+    if (event.target === managementModal) {
+        closeDatabaseManagementPanel();
+    }
+};

@@ -9,8 +9,22 @@
 <body>
     <div class="container">
         <header>
-            <h1>Simple RDBMS</h1>
-            <p>Manage your in-memory database with persistence</p>
+            <div class="header-content">
+                <div class="header-left">
+                    <h1>Simple RDBMS</h1>
+                    <p>Manage your in-memory database with persistence</p>
+                </div>
+                <div class="header-right">
+                    <div class="database-selector">
+                        <label for="database-select">Current Database:</label>
+                        <select id="database-select" onchange="switchDatabase()">
+                            <option value="">Loading...</option>
+                        </select>
+                        <button onclick="showCreateDatabaseModal()" class="btn-primary" title="Create new database">+ New</button>
+                        <button onclick="showDatabaseManagementPanel()" class="btn-secondary" title="Manage databases">⚙️</button>
+                    </div>
+                </div>
+            </div>
         </header>
 
         <!-- Navigation Tabs -->
@@ -18,6 +32,7 @@
             <button class="tab-button active" onclick="showTab('records')">Records</button>
             <button class="tab-button" onclick="showTab('tables')">Tables</button>
             <button class="tab-button" onclick="showTab('stats')">Statistics</button>
+            <button class="tab-button" onclick="showTab('databases')">Databases</button>
         </div>
 
         <!-- Records Tab -->
@@ -128,3 +143,52 @@
     <script src="app.js"></script>
 </body>
 </html>
+<!-- Databases Tab -->
+<div id="databases-tab" class="tab-content">
+    <div class="section">
+        <h2>Database Management</h2>
+        <button onclick="showCreateDatabaseModal()" class="btn-primary">+ Create New Database</button>
+        <button onclick="loadDatabases()" class="btn-secondary">Refresh List</button>
+    </div>
+
+    <div class="section">
+        <h2>Available Databases</h2>
+        <div id="databases-list">
+            <p>Loading databases...</p>
+        </div>
+    </div>
+</div>
+
+<!-- Create Database Modal -->
+<div id="create-database-modal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeCreateDatabaseModal()">&times;</span>
+        <h2>Create New Database</h2>
+        <form id="create-database-form" onsubmit="createDatabase(event)">
+            <div class="form-group">
+                <label for="new-database-name">Database Name:</label>
+                <input type="text" id="new-database-name" required 
+                       placeholder="e.g., analytics" 
+                       pattern="[a-zA-Z0-9_-]+"
+                       title="Only letters, numbers, underscores, and hyphens allowed">
+                <small>Only letters, numbers, underscores (_), and hyphens (-) are allowed</small>
+            </div>
+            <div class="form-actions">
+                <button type="submit" class="btn-primary">Create Database</button>
+                <button type="button" onclick="closeCreateDatabaseModal()" class="btn-secondary">Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Database Management Panel Modal -->
+<div id="database-management-modal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeDatabaseManagementPanel()">&times;</span>
+        <h2>Database Management</h2>
+        <div id="database-management-content">
+            <p>Loading databases...</p>
+        </div>
+    </div>
+</div>
+
