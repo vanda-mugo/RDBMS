@@ -259,6 +259,8 @@ export function setRoutes(app: Express) {
             dataType: col.dataType,
             isPrimaryKey: col.isPrimaryKey,
             isUnique: col.isUnique,
+            isForeignKey: col.isForeignKey,
+            foreignKeyReference: col.foreignKeyReference,
           })),
           recordCount,
         };
@@ -304,7 +306,9 @@ export function setRoutes(app: Express) {
             col.name,
             col.dataType || "VARCHAR",
             col.isPrimaryKey || false,
-            col.isUnique || false
+            col.isUnique || false,
+            col.isForeignKey || false,
+            col.foreignKeyReference
           )
       );
 
@@ -319,6 +323,8 @@ export function setRoutes(app: Express) {
           type: col.dataType,
           isPrimaryKey: col.isPrimaryKey,
           isUnique: col.isUnique,
+          isForeignKey: col.isForeignKey,
+          foreignKeyReference: col.foreignKeyReference,
         })),
       });
     } catch (error) {

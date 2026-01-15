@@ -6,6 +6,8 @@ let currentTableSchema = [];
 window.addEventListener('DOMContentLoaded', () => {
     refreshTables();
     loadStats();
+    // Initialize foreign key table selectors on page load
+    initializeForeignKeySelectors();
 });
 
 // ==================== TAB MANAGEMENT ====================
@@ -87,6 +89,7 @@ async function loadTablesList() {
                                 ${col.name} (${col.dataType})
                                 ${col.isPrimaryKey ? '<span class="badge">PK</span>' : ''}
                                 ${col.isUnique ? '<span class="badge">UNIQUE</span>' : ''}
+                                ${col.isForeignKey && col.foreignKeyReference ? `<span class="badge badge-fk">FK → ${col.foreignKeyReference.table}.${col.foreignKeyReference.column}</span>` : ''}
                             </li>
                         `).join('')}
                     </ul>
@@ -104,16 +107,41 @@ async function createTable(event) {
     const tableName = document.getElementById('new-table-name').value.trim();
     const columnDefs = document.querySelectorAll('.column-def');
 
-    const columns = Array.from(columnDefs).map(def => ({
-        name: def.querySelector('.col-name').value.trim(),
-        dataType: def.querySelector('.col-type').value,
-        isPrimaryKey: def.querySelector('.col-primary').checked,
-        isUnique: def.querySelector('.col-unique').checked
-    }));
+    const columns = Array.from(columnDefs).map(def => {
+        const isForeignKey = def.querySelector('.col-foreign-key').checked;
+        const column = {
+            name: def.querySelector('.col-name').value.trim(),
+            dataType: def.querySelector('.col-type').value,
+            isPrimaryKey: def.querySelector('.col-primary').checked,
+            isUnique: def.querySelector('.col-unique').checked,
+            isForeignKey: isForeignKey
+        };
+
+        if (isForeignKey) {
+            const refTable = def.querySelector('.col-fk-table').value;
+            const refColumn = def.querySelector('.col-fk-column').value;
+            if (refTable && refColumn) {
+                column.foreignKeyReference = {
+                    table: refTable,
+                    column: refColumn
+                };
+            }
+        }
+
+        return column;
+    });
 
     if (!tableName || columns.length === 0) {
         showMessage('Please provide table name and at least one column', 'error');
         return;
+    }
+
+    // Validate foreign keys
+    for (const col of columns) {
+        if (col.isForeignKey && !col.foreignKeyReference) {
+            showMessage(`Column '${col.name}' is marked as foreign key but has no reference selected`, 'error');
+            return;
+        }
     }
 
     try {
@@ -130,19 +158,7 @@ async function createTable(event) {
 
         showMessage(`Table '${tableName}' created successfully!`, 'success');
         document.getElementById('create-table-form').reset();
-        document.getElementById('columns-container').innerHTML = `
-            <div class="column-def">
-                <input type="text" placeholder="Column name" class="col-name" required>
-                <select class="col-type">
-                    <option value="INT">INT</option>
-                    <option value="VARCHAR">VARCHAR</option>
-                    <option value="BOOLEAN">BOOLEAN</option>
-                    <option value="DATE">DATE</option>
-                </select>
-                <label><input type="checkbox" class="col-primary"> Primary Key</label>
-                <label><input type="checkbox" class="col-unique"> Unique</label>
-            </div>
-        `;
+        await resetColumnContainer();
         
         await refreshTables();
         await loadTablesList();
@@ -188,9 +204,129 @@ function addColumnDef() {
         </select>
         <label><input type="checkbox" class="col-primary"> Primary Key</label>
         <label><input type="checkbox" class="col-unique"> Unique</label>
+        <label><input type="checkbox" class="col-foreign-key" onchange="toggleForeignKeyOptions(this)"> Foreign Key</label>
+        <div class="foreign-key-options" style="display: none;">
+            <select class="col-fk-table" onchange="loadForeignKeyColumns(this)">
+                <option value="">Select table...</option>
+            </select>
+            <select class="col-fk-column">
+                <option value="">Select column...</option>
+            </select>
+        </div>
         <button type="button" onclick="this.parentElement.remove()" class="btn-danger btn-sm">Remove</button>
     `;
     container.appendChild(newDef);
+    
+    // Load available tables into the foreign key table selector
+    loadForeignKeyTables(newDef.querySelector('.col-fk-table'));
+}
+
+// Toggle foreign key options visibility
+function toggleForeignKeyOptions(checkbox) {
+    const columnDef = checkbox.closest('.column-def');
+    const fkOptions = columnDef.querySelector('.foreign-key-options');
+    
+    if (checkbox.checked) {
+        fkOptions.style.display = 'flex';
+        // Load tables when enabled
+        loadForeignKeyTables(columnDef.querySelector('.col-fk-table'));
+    } else {
+        fkOptions.style.display = 'none';
+        // Clear selections
+        columnDef.querySelector('.col-fk-table').value = '';
+        columnDef.querySelector('.col-fk-column').value = '';
+    }
+}
+
+// Load available tables for foreign key reference
+async function loadForeignKeyTables(selectElement) {
+    try {
+        const response = await fetch('/api/tables');
+        const tablesData = await response.json();
+        const tables = tablesData.tables || tablesData;
+        
+        selectElement.innerHTML = '<option value="">Select table...</option>';
+        tables.forEach(table => {
+            const option = document.createElement('option');
+            option.value = table.name;
+            option.textContent = table.name;
+            selectElement.appendChild(option);
+        });
+    } catch (error) {
+        console.error('Error loading tables for foreign key:', error);
+    }
+}
+
+// Load columns from selected table for foreign key reference
+async function loadForeignKeyColumns(tableSelectElement) {
+    const columnDef = tableSelectElement.closest('.column-def');
+    const columnSelect = columnDef.querySelector('.col-fk-column');
+    const selectedTable = tableSelectElement.value;
+    
+    columnSelect.innerHTML = '<option value="">Select column...</option>';
+    
+    if (!selectedTable) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/tables');
+        const tablesData = await response.json();
+        const tables = tablesData.tables || tablesData;
+        const table = tables.find(t => t.name === selectedTable);
+        
+        if (table && table.columns) {
+            table.columns.forEach(col => {
+                const option = document.createElement('option');
+                option.value = col.name;
+                option.textContent = `${col.name} (${col.dataType})`;
+                columnSelect.appendChild(option);
+            });
+        }
+    } catch (error) {
+        console.error('Error loading columns for foreign key:', error);
+    }
+}
+
+// Reset column container to default state
+async function resetColumnContainer() {
+    const container = document.getElementById('columns-container');
+    container.innerHTML = `
+        <div class="column-def">
+            <input type="text" placeholder="Column name" class="col-name" required>
+            <select class="col-type">
+                <option value="INT">INT</option>
+                <option value="VARCHAR">VARCHAR</option>
+                <option value="BOOLEAN">BOOLEAN</option>
+                <option value="DATE">DATE</option>
+            </select>
+            <label><input type="checkbox" class="col-primary"> Primary Key</label>
+            <label><input type="checkbox" class="col-unique"> Unique</label>
+            <label><input type="checkbox" class="col-foreign-key" onchange="toggleForeignKeyOptions(this)"> Foreign Key</label>
+            <div class="foreign-key-options" style="display: none;">
+                <select class="col-fk-table" onchange="loadForeignKeyColumns(this)">
+                    <option value="">Select table...</option>
+                </select>
+                <select class="col-fk-column">
+                    <option value="">Select column...</option>
+                </select>
+            </div>
+        </div>
+    `;
+    
+    // Load tables for the initial column
+    const fkTableSelect = container.querySelector('.col-fk-table');
+    if (fkTableSelect) {
+        await loadForeignKeyTables(fkTableSelect);
+    }
+}
+
+// Initialize foreign key selectors for all existing column definitions
+async function initializeForeignKeySelectors() {
+    const fkTableSelects = document.querySelectorAll('.col-fk-table');
+    for (const select of fkTableSelects) {
+        await loadForeignKeyTables(select);
+    }
 }
 
 // ==================== RECORD MANAGEMENT ====================

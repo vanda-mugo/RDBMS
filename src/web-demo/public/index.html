@@ -94,6 +94,15 @@
                                 </select>
                                 <label><input type="checkbox" class="col-primary"> Primary Key</label>
                                 <label><input type="checkbox" class="col-unique"> Unique</label>
+                                <label><input type="checkbox" class="col-foreign-key" onchange="toggleForeignKeyOptions(this)"> Foreign Key</label>
+                                <div class="foreign-key-options" style="display: none;">
+                                    <select class="col-fk-table" onchange="loadForeignKeyColumns(this)">
+                                        <option value="">Select table...</option>
+                                    </select>
+                                    <select class="col-fk-column">
+                                        <option value="">Select column...</option>
+                                    </select>
+                                </div>
                             </div>
                         </div>
                         <button type="button" onclick="addColumnDef()" class="btn-secondary">+ Add Column</button>

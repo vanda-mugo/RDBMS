@@ -224,6 +224,7 @@ header p {
     background: #f8f9fa;
     border-radius: 8px;
     align-items: center;
+    flex-wrap: wrap;
 }
 
 .column-def input[type="text"] {
@@ -239,6 +240,32 @@ header p {
     align-items: center;
     gap: 5px;
     font-size: 0.9em;
+}
+
+.foreign-key-options {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+    margin-top: 5px;
+    padding: 10px;
+    background: #e9ecef;
+    border-radius: 5px;
+}
+
+.foreign-key-options select {
+    flex: 1;
+    padding: 8px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    background: white;
+}
+
+.foreign-key-options::before {
+    content: "References: ";
+    align-self: center;
+    font-size: 0.85em;
+    font-weight: 600;
+    color: #495057;
 }
 
 /* Buttons */
@@ -385,6 +412,12 @@ tbody tr:hover {
 .badge-unique {
     background: #10b981;
     color: white;
+}
+
+.badge-fk {
+    background: #f59e0b;
+    color: white;
+    font-size: 0.7em;
 }
 
 .badge-no {
