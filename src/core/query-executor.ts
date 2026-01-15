@@ -90,7 +90,10 @@ export class QueryExecutor {
       return this.parseCreateTable(query);
     } else if (trimmedQuery.startsWith("DROP TABLE")) {
       return this.parseDropTable(query);
-    } else if (trimmedQuery.startsWith("CREATE UNIQUE INDEX") || trimmedQuery.startsWith("CREATE INDEX")) {
+    } else if (
+      trimmedQuery.startsWith("CREATE UNIQUE INDEX") ||
+      trimmedQuery.startsWith("CREATE INDEX")
+    ) {
       return this.parseCreateIndex(query);
     } else if (trimmedQuery.startsWith("DROP INDEX")) {
       return this.parseDropIndex(query);
@@ -616,7 +619,12 @@ export class QueryExecutor {
     }
 
     try {
-      this.database.createIndex(tableName, columnName, indexName, unique || false);
+      this.database.createIndex(
+        tableName,
+        columnName,
+        indexName,
+        unique || false
+      );
       const uniqueText = unique ? "unique " : "";
       return {
         success: true,
