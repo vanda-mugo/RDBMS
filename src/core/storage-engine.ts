@@ -199,6 +199,26 @@ export class StorageEngine {
       database.connect();
     }
 
+    // Clear existing indexes first to prevent "already exists" errors during sync
+    const existingIndexes = database.listIndexNames();
+    for (const indexName of existingIndexes) {
+      try {
+        database.dropIndex(indexName);
+      } catch (error) {
+        // Ignore errors if index doesn't exist
+      }
+    }
+
+    // Clear existing tables to prevent conflicts
+    const existingTables = database.listTables();
+    for (const tableName of existingTables) {
+      try {
+        database.dropTable(tableName);
+      } catch (error) {
+        // Ignore errors if table doesn't exist
+      }
+    }
+
     // Recreate tables
     for (const [tableName, tableData] of Object.entries(serialized.tables)) {
       // Create columns array
