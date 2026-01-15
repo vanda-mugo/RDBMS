@@ -170,6 +170,8 @@ export class StorageEngine {
             dataType: col.dataType,
             isPrimaryKey: col.isPrimaryKey,
             isUnique: col.isUnique,
+            isForeignKey: col.isForeignKey,
+            foreignKeyReference: col.foreignKeyReference,
           })),
           records: table.selectAll(),
           // Include index definitions if any exist
@@ -224,7 +226,14 @@ export class StorageEngine {
       // Create columns array
       const columns = tableData.columns.map(
         (col: any) =>
-          new Column(col.name, col.dataType, col.isPrimaryKey, col.isUnique)
+          new Column(
+            col.name,
+            col.dataType,
+            col.isPrimaryKey,
+            col.isUnique,
+            col.isForeignKey || false,
+            col.foreignKeyReference
+          )
       );
 
       // Create table
