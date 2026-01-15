@@ -489,10 +489,10 @@ FROM [base_table]
 Always use `table.column` notation to avoid ambiguity:
 
 ```sql
--- ❌ Ambiguous - which 'id'?
+-- Ambiguous - which 'id'?
 SELECT id, name, amount FROM users INNER JOIN orders ON users.id = orders.user_id
 
--- ✅ Clear - explicitly qualified
+-- Clear - explicitly qualified
 SELECT users.id, users.name, orders.amount 
 FROM users 
 INNER JOIN orders ON users.id = orders.user_id
@@ -605,12 +605,12 @@ SELECT * FROM users INNER JOIN orders ON users.id = orders.user_id
 -- Test with 1,000 records:
 -- Without index: 46ms (nested loop)
 -- With index:     8ms (hash lookup)
--- Speedup: 5.75x faster ✨
+-- Speedup: 5.75x faster
 
 -- Expected with 100,000 records:
 -- Without index: ~4,600ms (nested loop)
 -- With index:    ~80ms (hash lookup)
--- Speedup: 57.5x faster 🚀
+-- Speedup: 57.5x faster
 ```
 
 **Best Practices for JOIN Performance:**
@@ -729,7 +729,7 @@ SELECT * FROM users INNER JOIN orders ON users.id = orders.user_id
 -- Solution: Create index on join column
 CREATE INDEX idx_order_user ON orders(user_id)
 SELECT * FROM users INNER JOIN orders ON users.id = orders.user_id
--- Takes: 50ms with index ✨
+-- Takes: 50ms with index
 ```
 
 **Issue: NULL values in results**
@@ -798,10 +798,10 @@ View all available databases with their storage locations:
 ```bash
 RDBMS> SHOW DATABASES
 Available databases:
-  • default (./data/default) [CURRENT]
-  • production (./data/production)
-  • development (./data/development)
-  • analytics (./data/analytics)
+  - default (./data/default) [CURRENT]
+  - production (./data/production)
+  - development (./data/development)
+  - analytics (./data/analytics)
 ```
 
 The `[CURRENT]` indicator shows which database you're currently using.
@@ -812,7 +812,7 @@ Create a new isolated database:
 
 ```bash
 RDBMS> CREATE DATABASE testing
-✓ Database 'testing' created at ./data/testing
+Database 'testing' created at ./data/testing
 ```
 
 **Features:**
@@ -828,10 +828,10 @@ Switch to a different database context:
 ```bash
 RDBMS> USE DATABASE production
 Saving current database 'default'...
-✓ Database saved to ./data/default/database.json
+Database saved to ./data/default/database.json
 Loading database 'production'...
-✓ Database loaded from ./data/production/database.json
-✓ Switched to database 'production'
+Database loaded from ./data/production/database.json
+Switched to database 'production'
 Loaded 3 table(s): users, orders, products
 ```
 
@@ -848,7 +848,7 @@ Remove a database and all its data:
 ```bash
 RDBMS> DROP DATABASE testing
   Are you sure you want to delete database 'testing' and all its data? (yes/no): yes
-✓ Database 'testing' deleted
+Database 'testing' deleted
 ```
 
 **Safety Features:**
