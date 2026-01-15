@@ -1,4 +1,5 @@
 import Database from "./database";
+import { Column } from "./column";
 
 interface ParsedQuery {
   type:
@@ -110,7 +111,10 @@ export class QueryExecutor {
    * Example: SELECT name, email FROM users
    */
   private parseSelect(query: string): ParsedQuery {
-    const selectRegex = /SELECT\s+(.+?)\s+FROM\s+(\w+)(?:\s+WHERE\s+(.+))?/i;
+    // Updated regex to capture JOIN clauses
+    // Pattern: SELECT columns FROM table [JOIN ...] [WHERE ...]
+    const selectRegex =
+      /SELECT\s+(.+?)\s+FROM\s+(\w+)((?:\s+(?:INNER|LEFT|RIGHT)\s+JOIN\s+.+?)*?)(?:\s+WHERE\s+(.+))?$/i;
     const match = query.match(selectRegex);
 
     if (!match) {
@@ -119,7 +123,11 @@ export class QueryExecutor {
 
     const columnsStr = match[1].trim();
     const tableName = match[2];
-    const whereStr = match[3];
+    const joinsStr = match[3] ? match[3].trim() : "";
+    const whereStr = match[4];
+
+    // Parse JOIN clauses if present
+    const joins = joinsStr ? this.parseJoins(joinsStr) : undefined;
 
     return {
       type: "SELECT",
@@ -127,26 +135,89 @@ export class QueryExecutor {
       columns:
         columnsStr === "*" ? [] : columnsStr.split(",").map((c) => c.trim()),
       where: whereStr ? this.parseWhere(whereStr) : undefined,
+      joins,
     };
+  }
+
+  /**
+   * Parse JOIN clauses
+   * Example: "INNER JOIN orders ON users.id = orders.user_id LEFT JOIN products ON orders.product_id = products.id"
+   */
+  private parseJoins(joinsStr: string): JoinClause[] {
+    const joins: JoinClause[] = [];
+
+    // Pattern: (INNER|LEFT|RIGHT) JOIN table_name ON left_table.column = right_table.column
+    const joinRegex =
+      /(INNER|LEFT|RIGHT)\s+JOIN\s+(\w+)\s+ON\s+(\w+)\.(\w+)\s*=\s*(\w+)\.(\w+)/gi;
+
+    let match;
+    while ((match = joinRegex.exec(joinsStr)) !== null) {
+      const joinType = match[1].toUpperCase() as "INNER" | "LEFT" | "RIGHT";
+      const joinTable = match[2];
+      const leftTable = match[3];
+      const leftColumn = match[4];
+      const rightTable = match[5];
+      const rightColumn = match[6];
+
+      joins.push({
+        type: joinType,
+        table: joinTable,
+        on: {
+          leftColumn: `${leftTable}.${leftColumn}`,
+          rightColumn: `${rightTable}.${rightColumn}`,
+        },
+      });
+    }
+
+    if (joins.length === 0) {
+      throw new Error("Invalid JOIN syntax");
+    }
+
+    return joins;
   }
 
   /**
    * Parse INSERT query
    * Example: INSERT INTO users (name, age) VALUES ('Alice', 25)
+   * Example: INSERT INTO users VALUES (1, 'Alice', 25) -- without column names
    */
   private parseInsert(query: string): ParsedQuery {
-    const insertRegex = /INSERT INTO\s+(\w+)\s*\((.+?)\)\s*VALUES\s*\((.+?)\)/i;
-    const match = query.match(insertRegex);
+    // Try with column names first
+    const insertWithColumnsRegex =
+      /INSERT INTO\s+(\w+)\s*\((.+?)\)\s*VALUES\s*\((.+?)\)/i;
+    let match = query.match(insertWithColumnsRegex);
 
-    if (!match) {
-      throw new Error("Invalid INSERT syntax");
+    let tableName: string;
+    let columns: string[];
+    let valuesStr: string;
+
+    if (match) {
+      // With column names: INSERT INTO users (id, name) VALUES (1, 'Alice')
+      tableName = match[1];
+      columns = match[2].split(",").map((c) => c.trim());
+      valuesStr = match[3];
+    } else {
+      // Try without column names: INSERT INTO users VALUES (1, 'Alice')
+      const insertWithoutColumnsRegex =
+        /INSERT INTO\s+(\w+)\s*VALUES\s*\((.+?)\)/i;
+      match = query.match(insertWithoutColumnsRegex);
+
+      if (!match) {
+        throw new Error("Invalid INSERT syntax");
+      }
+
+      tableName = match[1];
+      valuesStr = match[2];
+
+      // Get table columns in order
+      const table = this.database.getTable(tableName);
+      if (!table) {
+        throw new Error(`Table ${tableName} does not exist`);
+      }
+      columns = table.getColumns().map((col) => col.name);
     }
 
-    const tableName = match[1];
-    const columns = match[2].split(",").map((c) => c.trim());
-    const valuesStr = match[3];
-
-    // Parse values (handle strings, numbers, booleans)
+    // Parse values (handle strings, numbers, booleans, NULL)
     const values = this.parseValues(valuesStr);
 
     // Create data object
@@ -329,13 +400,18 @@ export class QueryExecutor {
    * 4. Fall back to full table scan if no index or unsupported operator
    */
   private executeSelect(parsedQuery: ParsedQuery): any[] {
-    const { tableName, columns, where } = parsedQuery;
+    const { tableName, columns, where, joins } = parsedQuery;
 
     if (!tableName) {
       throw new Error("Table name is required for SELECT");
     }
 
-    // Get all records or filter by WHERE
+    // Handle JOIN queries
+    if (joins && joins.length > 0) {
+      return this.executeJoin(tableName, joins, columns, where);
+    }
+
+    // Get all records or filter by WHERE (non-JOIN query)
     let results: any[];
 
     if (where) {
@@ -413,6 +489,255 @@ export class QueryExecutor {
   }
 
   /**
+   * Execute JOIN query using nested loop join algorithm
+   * Supports INNER, LEFT, and RIGHT joins
+   */
+  private executeJoin(
+    baseTableName: string,
+    joins: JoinClause[],
+    columns?: string[],
+    where?: WhereClause
+  ): any[] {
+    // Start with the base table
+    let results: any[] = this.database.query(baseTableName, () => true);
+
+    // Qualify base table columns with table name
+    results = results.map((record) =>
+      this.qualifyColumns(record, baseTableName)
+    );
+
+    // Apply each JOIN sequentially
+    for (const join of joins) {
+      results = this.applyJoin(results, join);
+    }
+
+    // Apply WHERE clause after all joins (if present)
+    if (where) {
+      results = results.filter((record) =>
+        this.evaluateJoinCondition(record, where)
+      );
+    }
+
+    // Project columns if specified
+    if (columns && columns.length > 0 && columns[0] !== "*") {
+      results = results.map((record) => {
+        const projected: any = {};
+        columns.forEach((col) => {
+          // Handle both qualified (table.column) and unqualified column names
+          if (col.includes(".")) {
+            projected[col] = record[col];
+          } else {
+            // Find the column in the record (could be from any joined table)
+            const matchingKey = Object.keys(record).find((key) =>
+              key.endsWith(`.${col}`)
+            );
+            if (matchingKey) {
+              projected[col] = record[matchingKey];
+            }
+          }
+        });
+        return projected;
+      });
+    }
+
+    return results;
+  }
+
+  /**
+   * Apply a single JOIN operation
+   * Uses nested loop join algorithm: O(n * m)
+   * Optimized with index lookup when available: O(n) with O(1) lookups
+   */
+  private applyJoin(leftRecords: any[], join: JoinClause): any[] {
+    const results: any[] = [];
+    const rightTableName = join.table;
+    const rightRecords = this.database.query(rightTableName, () => true);
+
+    // Qualify right table columns
+    const qualifiedRightRecords = rightRecords.map((record) =>
+      this.qualifyColumns(record, rightTableName)
+    );
+
+    // Extract table and column names from join condition
+    const [leftTable, leftCol] = join.on.leftColumn.split(".");
+    const [rightTable, rightCol] = join.on.rightColumn.split(".");
+
+    // Get right table column names for creating null records
+    const rightTableObj = this.database.getTable(rightTableName);
+    const rightTableColumns = rightTableObj
+      ? rightTableObj.getColumns().map((col) => `${rightTableName}.${col.name}`)
+      : [];
+
+    // 🚀 INDEX OPTIMIZATION: Check if right table has index on join column
+    const rightColumnUnqualified = rightCol;
+    const rightIndex = this.database.getIndexForColumn(
+      rightTableName,
+      rightColumnUnqualified
+    );
+
+    if (rightIndex && (join.type === "INNER" || join.type === "LEFT")) {
+      // 🎯 OPTIMIZED PATH: Use index for O(1) lookups instead of O(m) scan
+      // Performance: O(n) instead of O(n * m)
+
+      for (const leftRecord of leftRecords) {
+        const leftValue = leftRecord[join.on.leftColumn];
+
+        if (leftValue === null || leftValue === undefined) {
+          // NULL values don't match in joins
+          if (join.type === "LEFT") {
+            const nullRightRecord: any = {};
+            rightTableColumns.forEach((col) => {
+              nullRightRecord[col] = null;
+            });
+            results.push({ ...leftRecord, ...nullRightRecord });
+          }
+          continue;
+        }
+
+        // INDEX LOOKUP: O(1) hash lookup
+        const matchingRightRecords = rightIndex.search(leftValue);
+
+        if (matchingRightRecords.length > 0) {
+          // Found matches via index
+          for (const rightRecord of matchingRightRecords) {
+            const qualifiedRight = this.qualifyColumns(
+              rightRecord,
+              rightTableName
+            );
+            results.push({ ...leftRecord, ...qualifiedRight });
+          }
+        } else {
+          // No match found
+          if (join.type === "LEFT") {
+            const nullRightRecord: any = {};
+            rightTableColumns.forEach((col) => {
+              nullRightRecord[col] = null;
+            });
+            results.push({ ...leftRecord, ...nullRightRecord });
+          }
+        }
+      }
+    } else {
+      // STANDARD PATH: Nested loop join (no index available or RIGHT JOIN)
+      for (const leftRecord of leftRecords) {
+        let matched = false;
+
+        for (const rightRecord of qualifiedRightRecords) {
+          // Check if join condition is satisfied
+          const leftValue = leftRecord[join.on.leftColumn];
+          const rightValue = rightRecord[join.on.rightColumn];
+
+          if (leftValue === rightValue) {
+            // Merge records
+            results.push({ ...leftRecord, ...rightRecord });
+            matched = true;
+          }
+        }
+
+        // Handle LEFT JOIN: include unmatched left records with null right values
+        if (join.type === "LEFT" && !matched) {
+          const nullRightRecord: any = {};
+          // Add null values for all right table columns
+          rightTableColumns.forEach((col) => {
+            nullRightRecord[col] = null;
+          });
+          results.push({ ...leftRecord, ...nullRightRecord });
+        }
+      }
+
+      // Handle RIGHT JOIN: include unmatched right records with null left values
+      if (join.type === "RIGHT") {
+        for (const rightRecord of qualifiedRightRecords) {
+          const rightValue = rightRecord[join.on.rightColumn];
+          const matched = leftRecords.some(
+            (leftRecord) => leftRecord[join.on.leftColumn] === rightValue
+          );
+
+          if (!matched) {
+            const nullLeftRecord: any = {};
+            // Add null values for all left table columns
+            leftRecords.length > 0 &&
+              Object.keys(leftRecords[0]).forEach((key) => {
+                nullLeftRecord[key] = null;
+              });
+            results.push({ ...nullLeftRecord, ...rightRecord });
+          }
+        }
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Qualify column names with table name
+   * Converts { id: 1, name: 'Alice' } to { 'users.id': 1, 'users.name': 'Alice' }
+   */
+  private qualifyColumns(record: any, tableName: string): any {
+    const qualified: any = {};
+    Object.keys(record).forEach((key) => {
+      // Don't double-qualify if already qualified
+      if (!key.includes(".")) {
+        qualified[`${tableName}.${key}`] = record[key];
+      } else {
+        qualified[key] = record[key];
+      }
+    });
+    return qualified;
+  }
+
+  /**
+   * Evaluate WHERE condition for joined records (with qualified column names)
+   */
+  private evaluateJoinCondition(record: any, where: WhereClause): boolean {
+    // Handle qualified column names (table.column)
+    const columnValue = where.column.includes(".")
+      ? record[where.column]
+      : Object.keys(record).find((key) => key.endsWith(`.${where.column}`))
+      ? record[
+          Object.keys(record).find((key) => key.endsWith(`.${where.column}`))!
+        ]
+      : record[where.column];
+
+    let result: boolean;
+
+    switch (where.operator) {
+      case "=":
+        result = columnValue == where.value;
+        break;
+      case "!=":
+        result = columnValue != where.value;
+        break;
+      case ">":
+        result = columnValue > where.value;
+        break;
+      case "<":
+        result = columnValue < where.value;
+        break;
+      case ">=":
+        result = columnValue >= where.value;
+        break;
+      case "<=":
+        result = columnValue <= where.value;
+        break;
+      default:
+        throw new Error(`Unsupported operator: ${where.operator}`);
+    }
+
+    // Handle chained conditions (AND/OR)
+    if (where.next) {
+      const nextResult = this.evaluateJoinCondition(record, where.next);
+      if (where.logic === "AND") {
+        return result && nextResult;
+      } else if (where.logic === "OR") {
+        return result || nextResult;
+      }
+    }
+
+    return result;
+  }
+
+  /**
    * Execute INSERT query
    */
   private executeInsert(parsedQuery: ParsedQuery): string {
@@ -482,20 +807,37 @@ export class QueryExecutor {
 
     // Parse column definitions
     // Example: "id INT PRIMARY KEY, name VARCHAR, age INT"
+    // Example: "user_id INT FOREIGN KEY REFERENCES users(id)"
     const columnObjs = columns.map((colDef) => {
       const parts = colDef.split(/\s+/);
       const name = parts[0];
       const type = parts[1];
       const isPrimary = colDef.includes("PRIMARY KEY");
-      const isUnique = colDef.includes("UNIQUE");
+      const isUnique =
+        colDef.includes("UNIQUE") && !colDef.includes("PRIMARY KEY");
 
-      // Map to the Column interface expected by Database.createTable
-      return {
+      // Check for FOREIGN KEY constraint
+      // Pattern: FOREIGN KEY REFERENCES table_name(column_name)
+      const fkMatch = colDef.match(
+        /FOREIGN\s+KEY\s+REFERENCES\s+(\w+)\s*\(\s*(\w+)\s*\)/i
+      );
+      const isForeignKey = !!fkMatch;
+      const foreignKeyReference = fkMatch
+        ? {
+            table: fkMatch[1],
+            column: fkMatch[2],
+          }
+        : undefined;
+
+      // Create Column instance
+      return new Column(
         name,
-        dataType: type,
-        isPrimaryKey: isPrimary,
+        type,
+        isPrimary,
         isUnique,
-      };
+        isForeignKey,
+        foreignKeyReference
+      );
     });
 
     this.database.createTable(tableName, columnObjs);

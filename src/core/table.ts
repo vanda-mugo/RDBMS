@@ -29,17 +29,31 @@ export class Table {
    * @param type The data type of the column.
    * @param isPrimary Whether the column is a primary key.
    * @param isUnique Whether the column is unique.
+   * @param isForeignKey Whether the column is a foreign key.
+   * @param foreignKeyReference The foreign key reference (table and column).
    */
   addColumn(
     name: string,
     type: string,
     isPrimary: boolean = false,
-    isUnique: boolean = false
+    isUnique: boolean = false,
+    isForeignKey: boolean = false,
+    foreignKeyReference?: {
+      table: string;
+      column: string;
+    }
   ): void {
     if (this.columns.find((col) => col.name === name)) {
       throw new Error(`Column with name ${name} already exists`);
     }
-    const column = new Column(name, type, isPrimary, isUnique);
+    const column = new Column(
+      name,
+      type,
+      isPrimary,
+      isUnique,
+      isForeignKey,
+      foreignKeyReference
+    );
     this.columns.push(column);
   }
 
@@ -147,6 +161,11 @@ export class Table {
     expectedType: string,
     columnName: string
   ): void {
+    // Allow NULL values for all columns (nullable by default)
+    if (value === null || value === undefined) {
+      return;
+    }
+
     switch (expectedType.toLowerCase()) {
       case "int":
         if (!Number.isInteger(value)) {
@@ -209,6 +228,52 @@ export class Table {
         if (exists) {
           throw new Error(
             `Duplicate unique value '${value}' for column '${column.name}'`
+          );
+        }
+      }
+    }
+  }
+
+  /**
+   * Validates foreign key constraints for a record
+   * This method should be called from Database class which has access to all tables
+   * @param record The record to validate
+   * @param getTableCallback Callback function to get a table by name from the database
+   */
+  public validateForeignKeys(
+    record: any,
+    getTableCallback: (tableName: string) => Table | undefined
+  ): void {
+    for (const column of this.columns) {
+      if (column.isForeignKey && column.foreignKeyReference) {
+        const value = record[column.name];
+
+        // NULL values are allowed for foreign keys (optional relationships)
+        if (value === null || value === undefined) {
+          continue;
+        }
+
+        const refTableName = column.foreignKeyReference.table;
+        const refColumnName = column.foreignKeyReference.column;
+
+        // Get referenced table
+        const refTable = getTableCallback(refTableName);
+
+        if (!refTable) {
+          throw new Error(
+            `Foreign key constraint violation: Referenced table '${refTableName}' does not exist`
+          );
+        }
+
+        // Check if the value exists in the referenced table's column
+        const exists = refTable
+          .selectAll()
+          .some((r) => r[refColumnName] === value);
+
+        if (!exists) {
+          throw new Error(
+            `Foreign key constraint violation on column '${column.name}': ` +
+              `Value '${value}' does not exist in ${refTableName}.${refColumnName}`
           );
         }
       }

@@ -76,7 +76,9 @@ class Database {
         column.name,
         column.dataType,
         column.isPrimaryKey,
-        column.isUnique
+        column.isUnique,
+        column.isForeignKey,
+        column.foreignKeyReference
       );
     }
 
@@ -98,6 +100,12 @@ class Database {
     if (!table) {
       throw new Error(`Table ${tableName} does not exist.`);
     }
+
+    // Validate foreign key constraints before inserting
+    table.validateForeignKeys(data, (refTableName: string) =>
+      this.getTable(refTableName)
+    );
+
     table.insert(data);
   }
 
@@ -120,6 +128,17 @@ class Database {
     if (!table) {
       throw new Error(`Table ${tableName} does not exist.`);
     }
+
+    // Validate foreign key constraints for the updated data
+    // We need to check each record that will be updated
+    const recordsToUpdate = table.query(condition);
+    for (const record of recordsToUpdate) {
+      const updatedRecord = { ...record, ...data };
+      table.validateForeignKeys(updatedRecord, (refTableName: string) =>
+        this.getTable(refTableName)
+      );
+    }
+
     table.update(data, condition);
   }
 
