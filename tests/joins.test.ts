@@ -426,7 +426,7 @@ describe("JOIN Functionality", () => {
       // Index should be at least 2x faster (usually 10-100x faster)
       expect(timeWithIndex).toBeLessThan(timeWithoutIndex / 2);
 
-      console.log(`\n📊 JOIN Performance Improvement:`);
+      console.log(`\n JOIN Performance Improvement:`);
       console.log(`   Without Index: ${timeWithoutIndex}ms`);
       console.log(`   With Index: ${timeWithIndex}ms`);
       console.log(
