@@ -281,6 +281,28 @@ RDBMS> SYNC
 
 The system supports managing multiple independent databases, each with its own isolated tables, records, and storage. This feature enables organizing data into logical units (e.g., separate databases for production, development, testing, or different projects).
 
+## Indexing
+
+The system provides robust indexing capabilities to dramatically improve query performance. Indexes create optimized data structures that enable fast lookups, particularly for WHERE clause filtering.
+
+### What Are Indexes?
+
+An index is a data structure that improves the speed of data retrieval operations on a table at the cost of additional storage space and slower write operations. Think of it like a book's index - instead of reading every page to find a topic, you look it up in the index and jump directly to the relevant pages.
+
+**Performance Impact:**
+- **Without Index**: Query scans every record (O(n) - linear time)
+- **With Index**: Direct lookup or range scan (O(1) for equality, O(k) for ranges where k = matching records)
+
+**Example:**
+```sql
+-- Without index on 'price': Scans 100,000 records
+SELECT * FROM products WHERE price = 299
+
+-- With index on 'price': Direct hash lookup, finds record instantly
+CREATE INDEX idx_price ON products(price)
+SELECT * FROM products WHERE price = 299  -- 100,000x faster!
+
+
 ### Database Storage Structure
 
 Each database is stored in its own subdirectory under `./data/`:
