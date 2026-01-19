@@ -154,17 +154,36 @@ export class QueryExecutor {
     while ((match = joinRegex.exec(joinsStr)) !== null) {
       const joinType = match[1].toUpperCase() as "INNER" | "LEFT" | "RIGHT";
       const joinTable = match[2];
-      const leftTable = match[3];
-      const leftColumn = match[4];
-      const rightTable = match[5];
-      const rightColumn = match[6];
+      const firstTable = match[3];
+      const firstColumn = match[4];
+      const secondTable = match[5];
+      const secondColumn = match[6];
+
+      // Determine which is left (base/already-joined) and which is right (new join table)
+      // The join table (match[2]) should be on the "right" side
+      let leftColumn: string;
+      let rightColumn: string;
+
+      if (secondTable === joinTable) {
+        // Normal order: base_table.col = join_table.col
+        leftColumn = `${firstTable}.${firstColumn}`;
+        rightColumn = `${secondTable}.${secondColumn}`;
+      } else if (firstTable === joinTable) {
+        // Reversed order: join_table.col = base_table.col
+        leftColumn = `${secondTable}.${secondColumn}`;
+        rightColumn = `${firstTable}.${firstColumn}`;
+      } else {
+        // Neither matches - might be multi-join scenario, keep as-is
+        leftColumn = `${firstTable}.${firstColumn}`;
+        rightColumn = `${secondTable}.${secondColumn}`;
+      }
 
       joins.push({
         type: joinType,
         table: joinTable,
         on: {
-          leftColumn: `${leftTable}.${leftColumn}`,
-          rightColumn: `${rightTable}.${rightColumn}`,
+          leftColumn,
+          rightColumn,
         },
       });
     }
